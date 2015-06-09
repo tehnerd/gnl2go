@@ -17,8 +17,6 @@ in example/: few commands, which shows how to work with ipvs's lib
 
 ####TODOs:
 bugfixes etc (i do know about incorrect ipv6struct to ipv6string conversion)
-right now we do panic a lot. not sure that we should do it each time we bumped into error.
-mb in production it would be more usefull to check err, and act according to it.
 i dont use it (lib for ipvs) in production yet. not sure when i would. prob till that time i'd only fix
 problem with ipv6 to string and any other minor bugs, which i'd bump into
 

@@ -1,11 +1,60 @@
 package gnl2go
 
+/*
+This package implements routines to work with linux LVS, so we would be able
+to work with LVS nativly, instead of using Exec(ipvsadm).
+It is expecting for end user to work with this routines:
+
+ipvs := new(IpvsClient)
+err := ipvs.Init() - to init netlink socket etc
+
+err := ipvs.Flush() - to flush lvs table
+
+pools,err := ipvs.GetPools() - to check which services and dest has been configured
+
+err := ipvs.AddService(vip_string,port_uint16,protocol_uint16,scheduler_string) - add new service,
+	which will be described by it's address (lvs also support service by fwmark (from iptables), check bellow)
+	type of service(ipv4 or ipv6) will be deduced from it's vip address
+
+err := ipvs.DelService(vip_string,port_uint16,protocol_uint16) - to delete service
+
+err := ipvs.AddFWMService(fwmark_uint32,sched_string,af_uint16) - add fwmark service, we must also
+	provide the type of service (af; must be syscall.AF_INET for ipv4 or syscall.AF_INET6 for ipv6)
+
+err := ipvs.DelFWMService(fwmark_uint32,af_uint16) - delete fwmark service
+
+err := ipvs.AddDest(vip_string,port_uint16,rip_string,protocol_uint16,weight_int32) - add destination rip to vip.
+	BEWARE: right now there is few limitation, which probably will be removed in future (it's trivial to, but api(func call) will be
+	changed). Right now the limitation is: only tunneling supported as a way to send traffic from LVS SLB to real server.
+	Port number on real server must be the same as in service definition (right now we cant have VIP:80 -> RIP:8080)
+
+err := ipvs.UpdateDest(vip_string,port_uint16,rip_string,protocol_uint16,weight_int32) - change description of real server(for example
+	change it's weight)
+
+err := ipvs.DelDest(vip_string,port_uint16,rip_string,protocol_uint16)
+
+err := ipvs.AddFWMDest(fwmark_uint32,rip_string,vaf_uint16,port_uint16,weight_int32) - add destination to fwmark bassed service,
+	vaf - fwmark's service address family. BEWARE: only tunneling supported as for now (check limitation above). any port could be used
+	on real's side
+
+err := ipvs.UpdateFWMDest(fwmark_uint32,rip_string,vaf_uint16,port_uint16,weight_int32)
+
+err := DelFWMDest(fwmark_uint32,rip_string,vaf_uint16,port_uint16)
+
+ipvs.Exit() - to close NL socket
+
+*/
+
 import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
 	"strings"
 	"syscall"
+)
+
+const (
+	IPVS_TUNNELING = 2
 )
 
 var (
@@ -114,52 +163,55 @@ func validateIp(ip string) bool {
 	return true
 }
 
-func toAFUnion(ip string) (uint16, []byte) {
+func toAFUnion(ip string) (uint16, []byte, error) {
 	buf := new(bytes.Buffer)
 	for _, c := range ip {
 		if c == ':' {
 			addr, _ := IPv6StringToAddr(ip)
 			err := binary.Write(buf, binary.BigEndian, addr)
 			if err != nil {
-				panic("cant encode ipv6 addr to net format")
+				return 0, nil, err
 			}
 			encAddr := buf.Bytes()
 			if len(encAddr) != 16 {
-				panic("length not equal to 16")
+				return 0, nil, fmt.Errorf("length not equal to 16\n")
 			}
-			return syscall.AF_INET6, encAddr
+			return syscall.AF_INET6, encAddr, nil
 		}
 	}
-	addr, _ := IPv4ToUint32(ip)
-	err := binary.Write(buf, binary.BigEndian, addr)
+	addr, err := IPv4ToUint32(ip)
 	if err != nil {
-		panic("cant encode ipv4 addr to net format")
+		return 0, nil, err
+	}
+	err = binary.Write(buf, binary.BigEndian, addr)
+	if err != nil {
+		return 0, nil, err
 	}
 	encAddr := buf.Bytes()
 	for len(encAddr) != 16 {
 		encAddr = append(encAddr, byte(0))
 	}
-	return syscall.AF_INET, encAddr
+	return syscall.AF_INET, encAddr, nil
 }
 
-func fromAFUnion(af uint16, addr []byte) string {
+func fromAFUnion(af uint16, addr []byte) (string, error) {
 	if af == syscall.AF_INET6 {
 		var v6addr IPv6Addr
 		err := binary.Read(bytes.NewReader(addr), binary.BigEndian, &v6addr)
 		if err != nil {
-			panic("cant decode ipv6 addr from net repr")
+			return "", fmt.Errorf("cant decode ipv6 addr from net repr:%v\n", err)
 		}
 		addrStr := IPv6AddrToString(v6addr)
-		return addrStr
+		return addrStr, nil
 	}
 	var v4addr uint32
 	//we leftpadded addr to len 16 above,so our v4 addr in addr[12:]
 	err := binary.Read(bytes.NewReader(addr[:4]), binary.BigEndian, &v4addr)
 	if err != nil {
-		panic("cant decode v4 addr from net rep")
+		return "", fmt.Errorf("cant decode ipv4 addr from net repr:%v\n", err)
 	}
 	addrStr := Uint32IPv4ToString(v4addr)
-	return addrStr
+	return addrStr, nil
 }
 
 func ToProtoNum(proto NulStringType) U16Type {
@@ -194,7 +246,7 @@ func (d *Dest) IsEqual(od *Dest) bool {
 	return d.IP == od.IP && d.Weight == od.Weight && d.Port == od.Port
 }
 
-func (d *Dest) InitFromAttrList(list map[string]SerDes) {
+func (d *Dest) InitFromAttrList(list map[string]SerDes) error {
 	//lots of casts from interface w/o checks; so we are going to panic if something goes wrong
 	af, ok := list["ADDR_FAMILY"].(*U16Type)
 	if !ok {
@@ -206,22 +258,24 @@ func (d *Dest) InitFromAttrList(list map[string]SerDes) {
 	}
 	addr, ok := list["ADDR"].(*BinaryType)
 	if !ok {
-		fmt.Printf("attr list: %#v\n", list)
-		panic("no dst ADDR in attr list")
+		return fmt.Errorf("no dst ADDR in attr list: %#v\n", list)
 	}
-	d.IP = fromAFUnion(uint16(*af), []byte(*addr))
+	ip, err := fromAFUnion(uint16(*af), []byte(*addr))
+	if err != nil {
+		return err
+	}
+	d.IP = ip
 	w, ok := list["WEIGHT"].(*I32Type)
 	if !ok {
-		fmt.Printf("attr list: %#v\n", list)
-		panic("no dst WEIGHT in attr list")
+		return fmt.Errorf("no dst WEIGHT in attr list: %#v\n", list)
 	}
 	d.Weight = int32(*w)
 	p, ok := list["PORT"].(*Net16Type)
 	if !ok {
-		fmt.Printf("attr list: %#v\n", list)
-		panic("no dst PORT in attr list")
+		return fmt.Errorf("no dst PORT in attr list: %#v\n", list)
 	}
 	d.Port = uint16(*p)
+	return nil
 }
 
 type Service struct {
@@ -238,12 +292,16 @@ func (s *Service) IsEqual(os Service) bool {
 		s.Port == os.Port && s.Sched == os.Sched && s.FWMark == os.FWMark
 }
 
-func (s *Service) InitFromAttrList(list map[string]SerDes) {
+func (s *Service) InitFromAttrList(list map[string]SerDes) error {
 	if _, exists := list["ADDR"]; exists {
 		af := list["AF"].(*U16Type)
 		s.AF = uint16(*af)
 		addr := list["ADDR"].(*BinaryType)
-		s.VIP = fromAFUnion(uint16(*af), []byte(*addr))
+		vip, err := fromAFUnion(uint16(*af), []byte(*addr))
+		if err != nil {
+			return err
+		}
+		s.VIP = vip
 		proto := list["PROTOCOL"].(*U16Type)
 		s.Proto = uint16(*proto)
 		p := list["PORT"].(*Net16Type)
@@ -255,6 +313,7 @@ func (s *Service) InitFromAttrList(list map[string]SerDes) {
 	}
 	sched := list["SCHED_NAME"].(*NulStringType)
 	s.Sched = string(*sched)
+	return nil
 }
 
 type Pool struct {
@@ -271,28 +330,51 @@ type IpvsClient struct {
 	mt   *MessageType
 }
 
-func (ipvs *IpvsClient) Init() {
+func (ipvs *IpvsClient) Init() error {
 	LookupTypeOnStartup(IpvsMessageInitList, "IPVS")
-	ipvs.Sock.Init()
+	err := ipvs.Sock.Init()
+	if err != nil {
+		return err
+	}
 	ipvs.mt = Family2MT[MT2Family["IPVS"]]
+	return nil
 }
 
-func (ipvs *IpvsClient) Flush() {
-	msg := ipvs.mt.InitGNLMessageStr("FLUSH", ACK_REQUEST)
-	ipvs.Sock.Execute(msg)
+func (ipvs *IpvsClient) Flush() error {
+	msg, err := ipvs.mt.InitGNLMessageStr("FLUSH", ACK_REQUEST)
+	if err != nil {
+		return err
+	}
+	err = ipvs.Sock.Execute(msg)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
-func (ipvs *IpvsClient) GetPools() []Pool {
+func (ipvs *IpvsClient) GetPools() ([]Pool, error) {
 	var pools []Pool
-	msg := ipvs.mt.InitGNLMessageStr("GET_SERVICE", MATCH_ROOT_REQUEST)
-	resps := ipvs.Sock.Query(msg)
+	msg, err := ipvs.mt.InitGNLMessageStr("GET_SERVICE", MATCH_ROOT_REQUEST)
+	if err != nil {
+		return nil, err
+	}
+	resps, err := ipvs.Sock.Query(msg)
+	if err != nil {
+		return nil, err
+	}
 	for _, resp := range resps {
 		var pool Pool
 		svcAttrList := resp.GetAttrList("SERVICE")
 		pool.Service.InitFromAttrList(svcAttrList.(*AttrListType).Amap)
-		destReq := ipvs.mt.InitGNLMessageStr("GET_DEST", MATCH_ROOT_REQUEST)
+		destReq, err := ipvs.mt.InitGNLMessageStr("GET_DEST", MATCH_ROOT_REQUEST)
+		if err != nil {
+			return nil, err
+		}
 		destReq.AttrMap["SERVICE"] = svcAttrList.(*AttrListType)
-		destResps := ipvs.Sock.Query(destReq)
+		destResps, err := ipvs.Sock.Query(destReq)
+		if err != nil {
+			return nil, err
+		}
 		for _, destResp := range destResps {
 			var d Dest
 			dstAttrList := destResp.GetAttrList("DEST")
@@ -304,18 +386,24 @@ func (ipvs *IpvsClient) GetPools() []Pool {
 		}
 		pools = append(pools, pool)
 	}
-	return pools
+	return pools, nil
 }
 
 func (ipvs *IpvsClient) modifyService(method string, vip string,
-	port uint16, protocol uint16, amap map[string]SerDes) {
-	af, addr := toAFUnion(vip)
+	port uint16, protocol uint16, amap map[string]SerDes) error {
+	af, addr, err := toAFUnion(vip)
+	if err != nil {
+		return err
+	}
 	//1<<32-1
 	netmask := uint32(4294967295)
 	if af == syscall.AF_INET6 {
 		netmask = 128
 	}
-	msg := ipvs.mt.InitGNLMessageStr(method, ACK_REQUEST)
+	msg, err := ipvs.mt.InitGNLMessageStr(method, ACK_REQUEST)
+	if err != nil {
+		return err
+	}
 	AF := U16Type(af)
 	Port := Net16Type(port)
 	Netmask := U32Type(netmask)
@@ -334,35 +422,50 @@ func (ipvs *IpvsClient) modifyService(method string, vip string,
 		sattr.Amap[k] = v
 	}
 	msg.AttrMap["SERVICE"] = &sattr
-	ipvs.Sock.Execute(msg)
+	err = ipvs.Sock.Execute(msg)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (ipvs *IpvsClient) AddService(vip string,
-	port uint16, protocol uint16, sched string) {
+	port uint16, protocol uint16, sched string) error {
 	paramsMap := make(map[string]SerDes)
 	Sched := NulStringType(sched)
 	Timeout := U32Type(0)
 	paramsMap["SCHED_NAME"] = &Sched
 	paramsMap["TIMEOUT"] = &Timeout
-	ipvs.modifyService("NEW_SERVICE", vip, port,
+	err := ipvs.modifyService("NEW_SERVICE", vip, port,
 		protocol, paramsMap)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (ipvs *IpvsClient) DelService(vip string,
-	port uint16, protocol uint16) {
-	ipvs.modifyService("DEL_SERVICE", vip, port,
+	port uint16, protocol uint16) error {
+	err := ipvs.modifyService("DEL_SERVICE", vip, port,
 		protocol, nil)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (ipvs *IpvsClient) modifyFWMService(method string, fwmark uint32,
-	af uint16, amap map[string]SerDes) {
+	af uint16, amap map[string]SerDes) error {
 	AF := U16Type(af)
 	FWMark := U32Type(fwmark)
 	netmask := uint32(4294967295)
 	if af == syscall.AF_INET6 {
 		netmask = 128
 	}
-	msg := ipvs.mt.InitGNLMessageStr(method, ACK_REQUEST)
+	msg, err := ipvs.mt.InitGNLMessageStr(method, ACK_REQUEST)
+	if err != nil {
+		return err
+	}
 	Netmask := U32Type(netmask)
 	Flags := BinaryType([]byte{0, 0, 0, 0, 0, 0, 0, 0})
 	atl, _ := ATLName2ATL["IpvsServiceAttrList"]
@@ -375,31 +478,51 @@ func (ipvs *IpvsClient) modifyFWMService(method string, fwmark uint32,
 		sattr.Amap[k] = v
 	}
 	msg.AttrMap["SERVICE"] = &sattr
-	ipvs.Sock.Execute(msg)
+	err = ipvs.Sock.Execute(msg)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (ipvs *IpvsClient) AddFWMService(fwmark uint32,
-	sched string, af uint16) {
+	sched string, af uint16) error {
 	paramsMap := make(map[string]SerDes)
 	Sched := NulStringType(sched)
 	Timeout := U32Type(0)
 	paramsMap["SCHED_NAME"] = &Sched
 	paramsMap["TIMEOUT"] = &Timeout
-	ipvs.modifyFWMService("NEW_SERVICE", fwmark,
+	err := ipvs.modifyFWMService("NEW_SERVICE", fwmark,
 		af, paramsMap)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
-func (ipvs *IpvsClient) DelFWMService(fwmark uint32, af uint16) {
-	ipvs.modifyFWMService("DEL_SERVICE", fwmark, af, nil)
+func (ipvs *IpvsClient) DelFWMService(fwmark uint32, af uint16) error {
+	err := ipvs.modifyFWMService("DEL_SERVICE", fwmark, af, nil)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (ipvs *IpvsClient) modifyDest(method string, vip string, port uint16,
-	rip string, protocol uint16, amap map[string]SerDes) {
+	rip string, protocol uint16, amap map[string]SerDes) error {
 	//starts with r - for real's related, v - for vip's
-	vaf, vaddr := toAFUnion(vip)
-	raf, raddr := toAFUnion(rip)
-	msg := ipvs.mt.InitGNLMessageStr(method, ACK_REQUEST)
-
+	vaf, vaddr, err := toAFUnion(vip)
+	if err != nil {
+		return err
+	}
+	raf, raddr, err := toAFUnion(rip)
+	if err != nil {
+		return err
+	}
+	msg, err := ipvs.mt.InitGNLMessageStr(method, ACK_REQUEST)
+	if err != nil {
+		return err
+	}
 	vAF := U16Type(vaf)
 	vAddr := BinaryType(vaddr)
 	rAF := U16Type(raf)
@@ -431,51 +554,72 @@ func (ipvs *IpvsClient) modifyDest(method string, vip string, port uint16,
 	}
 	msg.AttrMap["SERVICE"] = &sattr
 	msg.AttrMap["DEST"] = &rattr
-	ipvs.Sock.Execute(msg)
+	err = ipvs.Sock.Execute(msg)
+	if err != nil {
+		return err
+	}
+	return nil
 
 }
 
 func (ipvs *IpvsClient) AddDest(vip string, port uint16, rip string,
-	protocol uint16, weight int32) {
+	protocol uint16, weight int32) error {
 	paramsMap := make(map[string]SerDes)
 	Weight := I32Type(weight)
 	//XXX(tehnerd): hardcode, but easy to fix; 2 - tunneling
-	FWDMethod := U32Type(2)
+	FWDMethod := U32Type(IPVS_TUNNELING)
 	LThresh := U32Type(0)
 	UThresh := U32Type(0)
 	paramsMap["WEIGHT"] = &Weight
 	paramsMap["FWD_METHOD"] = &FWDMethod
 	paramsMap["L_THRESH"] = &LThresh
 	paramsMap["U_THRESH"] = &UThresh
-	ipvs.modifyDest("NEW_DEST", vip, port, rip, protocol, paramsMap)
+	err := ipvs.modifyDest("NEW_DEST", vip, port, rip, protocol, paramsMap)
+	if err != nil {
+		return err
+	}
+	return err
 }
 
 func (ipvs *IpvsClient) UpdateDest(vip string, port uint16, rip string,
-	protocol uint16, weight int32) {
+	protocol uint16, weight int32) error {
 	paramsMap := make(map[string]SerDes)
 	Weight := I32Type(weight)
 	//XXX(tehnerd): hardcode, but easy to fix; 2 - tunneling
-	FWDMethod := U32Type(2)
+	FWDMethod := U32Type(IPVS_TUNNELING)
 	LThresh := U32Type(0)
 	UThresh := U32Type(0)
 	paramsMap["WEIGHT"] = &Weight
 	paramsMap["FWD_METHOD"] = &FWDMethod
 	paramsMap["L_THRESH"] = &LThresh
 	paramsMap["U_THRESH"] = &UThresh
-	ipvs.modifyDest("SET_DEST", vip, port, rip, protocol, paramsMap)
+	err := ipvs.modifyDest("SET_DEST", vip, port, rip, protocol, paramsMap)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (ipvs *IpvsClient) DelDest(vip string, port uint16, rip string,
-	protocol uint16) {
-	ipvs.modifyDest("DEL_DEST", vip, port, rip, protocol, nil)
+	protocol uint16) error {
+	err := ipvs.modifyDest("DEL_DEST", vip, port, rip, protocol, nil)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (ipvs *IpvsClient) modifyFWMDest(method string, fwmark uint32,
-	rip string, vaf uint16, port uint16, amap map[string]SerDes) {
+	rip string, vaf uint16, port uint16, amap map[string]SerDes) error {
 	//starts with r - for real's related, v - for vip's
-	raf, raddr := toAFUnion(rip)
-	msg := ipvs.mt.InitGNLMessageStr(method, ACK_REQUEST)
-
+	raf, raddr, err := toAFUnion(rip)
+	if err != nil {
+		return err
+	}
+	msg, err := ipvs.mt.InitGNLMessageStr(method, ACK_REQUEST)
+	if err != nil {
+		return err
+	}
 	vAF := U16Type(vaf)
 
 	rAF := U16Type(raf)
@@ -502,8 +646,11 @@ func (ipvs *IpvsClient) modifyFWMDest(method string, fwmark uint32,
 	}
 	msg.AttrMap["SERVICE"] = &sattr
 	msg.AttrMap["DEST"] = &rattr
-	ipvs.Sock.Execute(msg)
-
+	err = ipvs.Sock.Execute(msg)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 /*
@@ -512,38 +659,50 @@ func (ipvs *IpvsClient) modifyFWMDest(method string, fwmark uint32,
 
 */
 func (ipvs *IpvsClient) AddFWMDest(fwmark uint32, rip string, vaf uint16,
-	port uint16, weight int32) {
+	port uint16, weight int32) error {
 	paramsMap := make(map[string]SerDes)
 	Weight := I32Type(weight)
 	//XXX(tehnerd): hardcode, but easy to fix; 2 - tunneling
-	FWDMethod := U32Type(2)
+	FWDMethod := U32Type(IPVS_TUNNELING)
 	LThresh := U32Type(0)
 	UThresh := U32Type(0)
 	paramsMap["WEIGHT"] = &Weight
 	paramsMap["FWD_METHOD"] = &FWDMethod
 	paramsMap["L_THRESH"] = &LThresh
 	paramsMap["U_THRESH"] = &UThresh
-	ipvs.modifyFWMDest("NEW_DEST", fwmark, rip, vaf, port, paramsMap)
+	err := ipvs.modifyFWMDest("NEW_DEST", fwmark, rip, vaf, port, paramsMap)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (ipvs *IpvsClient) UpdateFWMDest(fwmark uint32, rip string, vaf uint16,
-	port uint16, weight int32) {
+	port uint16, weight int32) error {
 	paramsMap := make(map[string]SerDes)
 	Weight := I32Type(weight)
 	//XXX(tehnerd): hardcode, but easy to fix; 2 - tunneling
-	FWDMethod := U32Type(2)
+	FWDMethod := U32Type(IPVS_TUNNELING)
 	LThresh := U32Type(0)
 	UThresh := U32Type(0)
 	paramsMap["WEIGHT"] = &Weight
 	paramsMap["FWD_METHOD"] = &FWDMethod
 	paramsMap["L_THRESH"] = &LThresh
 	paramsMap["U_THRESH"] = &UThresh
-	ipvs.modifyFWMDest("SET_DEST", fwmark, rip, vaf, port, paramsMap)
+	err := ipvs.modifyFWMDest("SET_DEST", fwmark, rip, vaf, port, paramsMap)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (ipvs *IpvsClient) DelFWMDest(fwmark uint32, rip string, vaf uint16,
-	port uint16) {
-	ipvs.modifyFWMDest("DEL_DEST", fwmark, rip, vaf, port, nil)
+	port uint16) error {
+	err := ipvs.modifyFWMDest("DEL_DEST", fwmark, rip, vaf, port, nil)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (ipvs *IpvsClient) Exit() {

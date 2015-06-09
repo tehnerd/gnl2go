@@ -20,9 +20,15 @@ func TestAttrListSerDes(t *testing.T) {
 	testMap["HDRSIZE"] = &hdrSize
 	testMap["MAXATTR"] = &maxAttr
 	al.Set(testMap)
-	serializedList := al.Serialize()
+	serializedList, err := al.Serialize()
+	if err != nil {
+		t.Errorf("cant serialize attr list, error: %v\n", err)
+	}
 	fmt.Println(serializedList)
-	al.Deserialize(serializedList)
+	err = al.Deserialize(serializedList)
+	if err != nil {
+		t.Errorf("cant deserialize attrl list. error: %v\n", err)
+	}
 	for k, v := range testMap {
 		if data, exist := al.Amap[k]; !exist {
 			t.Errorf("deserialized map not equal to original\n key %v doesnt exist\n", k)
@@ -44,19 +50,22 @@ func TestToFromAFUnion(t *testing.T) {
 		t.Errorf("validation failed!\n")
 		return
 	}
-	af, addr := toAFUnion(v4addr)
+	af, addr, _ := toAFUnion(v4addr)
 	if af != syscall.AF_INET {
 		t.Errorf("to af failed")
 		return
 	}
-	v4dec := fromAFUnion(af, addr)
+	v4dec, _ := fromAFUnion(af, addr)
 	fmt.Println(v4dec)
-	af, addr = toAFUnion(v6addr)
+	af, addr, _ = toAFUnion(v6addr)
 	if af != syscall.AF_INET6 {
 		t.Errorf("to af failed")
 		return
 	}
-	v6dec := fromAFUnion(af, addr)
+	v6dec, err := fromAFUnion(af, addr)
+	if err != nil {
+		t.Errorf("cant decode ipv6 address\n")
+	}
 	fmt.Println(v6dec)
 
 }

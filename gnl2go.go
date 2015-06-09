@@ -1,5 +1,26 @@
 package gnl2go
 
+/*
+This package implements routines to work with Linux Generic Netlink Sockets
+There is a lot of generic netlink's specific parsing and hacks (coz of nature how nl is implemented;
+more info could be found @ rfc 3549 and man 7 netlink)
+For most of the ppl working with this lib will looks like(for example you can look into ipvs.go,
+which implements Linux'es LVS related wraper and routines):
+
+Define Netlink's Attribute's Lists and Message Types for particular family
+
+Create some kind of wraper around NLSocket,
+which, during init proccess, will add it's family name to LookupOnStartup Dict.
+
+Then the user of the lib would  create generic netlink message
+(InitGNLMessageStr, inited with msg name from MessageType dict)and add coresponding
+Attributes dict (msg.AttrMap)to that msg
+
+After that the user would either NLSocket.Execute(msg) or NLSocket.Query(msg).
+former will be used in case when we dont need any feedback, the latter would be used if we are quering for some kind of
+info from the kernel (the return type would be GNLMessage, and you can loop around AttrMap of that message)
+*/
+
 import (
 	"bytes"
 	"encoding/binary"
@@ -25,14 +46,17 @@ const (
 	CREATE  = 0x400
 	APPEND  = 0x800
 
+	NETLINK_GENERIC = 16
+
 	ACK_REQUEST        = (REQUEST | ACK)
 	MATCH_ROOT_REQUEST = (MATCH | ROOT | REQUEST)
 )
 
-/* from gnlpy:
-# In order to discover family IDs, we'll need to exchange some Ctrl
-# messages with the kernel.  We declare these message types and attribute
-# list types below.
+/*
+from gnlpy:
+	In order to discover family IDs, we'll need to exchange some Ctrl
+messages with the kernel.  We declare these message types and attribute
+list types below.
 */
 
 var (
@@ -97,29 +121,31 @@ var (
 	ATLName2ATL     = make(map[string][]AttrTuple)
 )
 
+/* Interface for abstraction over native generic netlink types */
 type SerDes interface {
-	Serialize() []byte
-	Deserialize([]byte)
+	Serialize() ([]byte, error)
+	Deserialize([]byte) error
 	Val()
 }
 
 type U8Type uint8
 
-func (u8 *U8Type) Serialize() []byte {
+func (u8 *U8Type) Serialize() ([]byte, error) {
 	writer := new(bytes.Buffer)
 	err := binary.Write(writer, binary.LittleEndian, u8)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return writer.Bytes()
+	return writer.Bytes(), nil
 }
 
-func (u8 *U8Type) Deserialize(buf []byte) {
+func (u8 *U8Type) Deserialize(buf []byte) error {
 	reader := bytes.NewReader(buf)
 	err := binary.Read(reader, binary.LittleEndian, u8)
 	if err != nil {
-		panic("error during binary reading")
+		return fmt.Errorf("error druing deserialization, %v\n", err)
 	}
+	return nil
 }
 
 func (u8 *U8Type) Val() {
@@ -128,20 +154,22 @@ func (u8 *U8Type) Val() {
 
 type U16Type uint16
 
-func (u16 *U16Type) Serialize() []byte {
+func (u16 *U16Type) Serialize() ([]byte, error) {
 	writer := new(bytes.Buffer)
 	err := binary.Write(writer, binary.LittleEndian, u16)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return writer.Bytes()
+	return writer.Bytes(), nil
 }
-func (u16 *U16Type) Deserialize(buf []byte) {
+func (u16 *U16Type) Deserialize(buf []byte) error {
 	reader := bytes.NewReader(buf)
 	err := binary.Read(reader, binary.LittleEndian, u16)
 	if err != nil {
-		panic("error during binary reading")
+		return fmt.Errorf("error druing deserialization, %v\n", err)
 	}
+	return nil
+
 }
 
 func (u16 *U16Type) Val() {
@@ -150,21 +178,24 @@ func (u16 *U16Type) Val() {
 
 type U32Type uint32
 
-func (u32 *U32Type) Serialize() []byte {
+func (u32 *U32Type) Serialize() ([]byte, error) {
 	writer := new(bytes.Buffer)
 	err := binary.Write(writer, binary.LittleEndian, u32)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return writer.Bytes()
+	return writer.Bytes(), nil
+
 }
 
-func (u32 *U32Type) Deserialize(buf []byte) {
+func (u32 *U32Type) Deserialize(buf []byte) error {
 	reader := bytes.NewReader(buf)
 	err := binary.Read(reader, binary.LittleEndian, u32)
 	if err != nil {
-		panic("error during binary reading")
+		return fmt.Errorf("error druing deserialization, %v\n", err)
 	}
+	return nil
+
 }
 
 func (u32 *U32Type) Val() {
@@ -173,21 +204,23 @@ func (u32 *U32Type) Val() {
 
 type I32Type int32
 
-func (i32 *I32Type) Serialize() []byte {
+func (i32 *I32Type) Serialize() ([]byte, error) {
 	writer := new(bytes.Buffer)
 	err := binary.Write(writer, binary.LittleEndian, i32)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return writer.Bytes()
+	return writer.Bytes(), nil
 }
 
-func (i32 *I32Type) Deserialize(buf []byte) {
+func (i32 *I32Type) Deserialize(buf []byte) error {
 	reader := bytes.NewReader(buf)
 	err := binary.Read(reader, binary.LittleEndian, i32)
 	if err != nil {
-		panic("error during binary reading")
+		return fmt.Errorf("error druing deserialization, %v\n", err)
 	}
+	return nil
+
 }
 
 func (i32 *I32Type) Val() {
@@ -196,21 +229,23 @@ func (i32 *I32Type) Val() {
 
 type U64Type uint64
 
-func (u64 *U64Type) Serialize() []byte {
+func (u64 *U64Type) Serialize() ([]byte, error) {
 	writer := new(bytes.Buffer)
 	err := binary.Write(writer, binary.LittleEndian, u64)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return writer.Bytes()
+	return writer.Bytes(), nil
 }
 
-func (u64 *U64Type) Deserialize(buf []byte) {
+func (u64 *U64Type) Deserialize(buf []byte) error {
 	reader := bytes.NewReader(buf)
 	err := binary.Read(reader, binary.LittleEndian, u64)
 	if err != nil {
-		panic("error during binary reading")
+		return fmt.Errorf("error druing deserialization, %v\n", err)
 	}
+	return nil
+
 }
 
 func (u64 *U64Type) Val() {
@@ -219,21 +254,23 @@ func (u64 *U64Type) Val() {
 
 type Net16Type uint16
 
-func (n16 *Net16Type) Serialize() []byte {
+func (n16 *Net16Type) Serialize() ([]byte, error) {
 	writer := new(bytes.Buffer)
 	err := binary.Write(writer, binary.BigEndian, n16)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return writer.Bytes()
+	return writer.Bytes(), nil
 }
 
-func (n16 *Net16Type) Deserialize(buf []byte) {
+func (n16 *Net16Type) Deserialize(buf []byte) error {
 	reader := bytes.NewReader(buf)
 	err := binary.Read(reader, binary.BigEndian, n16)
 	if err != nil {
-		panic("error during binary reading")
+		return fmt.Errorf("error druing deserialization, %v\n", err)
 	}
+	return nil
+
 }
 
 func (n16 *Net16Type) Val() {
@@ -242,21 +279,23 @@ func (n16 *Net16Type) Val() {
 
 type Net32Type uint32
 
-func (n32 *Net32Type) Serialize() []byte {
+func (n32 *Net32Type) Serialize() ([]byte, error) {
 	writer := new(bytes.Buffer)
 	err := binary.Write(writer, binary.BigEndian, n32)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return writer.Bytes()
+	return writer.Bytes(), nil
 }
 
-func (n32 *Net32Type) Deserialize(buf []byte) {
+func (n32 *Net32Type) Deserialize(buf []byte) error {
 	reader := bytes.NewReader(buf)
 	err := binary.Read(reader, binary.BigEndian, n32)
 	if err != nil {
-		panic("error during binary reading")
+		return fmt.Errorf("error druing deserialization, %v\n", err)
 	}
+	return nil
+
 }
 
 func (n32 *Net32Type) Val() {
@@ -265,16 +304,18 @@ func (n32 *Net32Type) Val() {
 
 type NulStringType string
 
-func (ns NulStringType) Serialize() []byte {
-	return append([]byte(ns), 0)
+func (ns NulStringType) Serialize() ([]byte, error) {
+	return append([]byte(ns), 0), nil
 }
 
-func (ns *NulStringType) Deserialize(buf []byte) {
+func (ns *NulStringType) Deserialize(buf []byte) error {
 	if buf[len(buf)-1] != 0 {
-		panic("non 0 terminated string")
+		return fmt.Errorf("non 0 terminated string\n")
 	}
 	s := string(buf[:len(buf)-1])
 	*ns = NulStringType(s)
+	return nil
+
 }
 
 func (ns *NulStringType) Val() {
@@ -283,11 +324,12 @@ func (ns *NulStringType) Val() {
 
 type IgnoreType bool
 
-func (it *IgnoreType) Serialize() []byte {
-	return nil
+func (it *IgnoreType) Serialize() ([]byte, error) {
+	return nil, nil
 }
 
-func (it *IgnoreType) Deserialize(buf []byte) {
+func (it *IgnoreType) Deserialize(buf []byte) error {
+	return nil
 }
 
 func (it *IgnoreType) Val() {
@@ -296,18 +338,23 @@ func (it *IgnoreType) Val() {
 
 type BinaryType []byte
 
-func (bt *BinaryType) Serialize() []byte {
-	return []byte(*bt)
+func (bt *BinaryType) Serialize() ([]byte, error) {
+	return []byte(*bt), nil
 }
 
-func (bt *BinaryType) Deserialize(buf []byte) {
+func (bt *BinaryType) Deserialize(buf []byte) error {
 	*bt = BinaryType(buf)
+	return nil
 }
 
 func (bt *BinaryType) Val() {
 	fmt.Println(*bt)
 }
 
+/*
+This struct has been used for describing and constructing netlink's
+attributes lists.
+*/
 type AttrTuple struct {
 	Name string
 	Type string
@@ -318,6 +365,11 @@ type AttrHdr struct {
 	Num uint16
 }
 
+/*
+Struct describes how we encode (which netlink's msg type number coresponds to which type)
+Amap contains dict of SerDes types, which we can serialize or where we will deserialize incoming
+msg.
+*/
 type AttrListType struct {
 	Key2name map[int]string
 	Name2key map[string]int
@@ -325,6 +377,9 @@ type AttrListType struct {
 	Amap     map[string]SerDes
 }
 
+/*
+Routine which helps us to create global attributelists definition dict.
+*/
 func CreateAttrListDefinition(listName string, atl []AttrTuple) []AttrTuple {
 	ATLName2ATL[listName] = atl
 	return atl
@@ -349,21 +404,22 @@ func (al *AttrListType) Set(amap map[string]SerDes) {
 	al.Amap = amap
 }
 
-func (al *AttrListType) Serialize() []byte {
+func (al *AttrListType) Serialize() ([]byte, error) {
 	buf := make([]byte, 0)
 	pad := make([]byte, 4)
 	for attrType, attrData := range al.Amap {
 		if attrNum, exists := al.Name2key[attrType]; !exists {
-			fmt.Printf("name2key: %#v\n", al.Name2key)
-			fmt.Println("attr type which doesnt  exist: ", attrType)
-			panic("err. amap and attrList are incompatible. No type in name2key")
+			return nil, fmt.Errorf("err. amap and attrList are incompatible:%#v\n%#v\n", al.Name2key, attrType)
 		} else {
-			data := attrData.Serialize()
+			data, err := attrData.Serialize()
+			if err != nil {
+				return nil, err
+			}
 			attrLen := AttrHdr{Len: uint16(len(data) + 4), Num: uint16(attrNum)}
 			attrBuf := new(bytes.Buffer)
-			err := binary.Write(attrBuf, binary.LittleEndian, attrLen)
+			err = binary.Write(attrBuf, binary.LittleEndian, attrLen)
 			if err != nil {
-				panic("cant encode attr len")
+				return nil, err
 			}
 			/*
 				TODO(tehnerd): lots of padding hack's translated from gnlpy as is.
@@ -373,55 +429,83 @@ func (al *AttrListType) Serialize() []byte {
 			buf = append(buf, data...)
 			padLen := (4 - (len(data) % 4)) & 0x3
 			if padLen > 4 {
-				panic("error in pad len calc")
+				return nil, fmt.Errorf("wrong pad len calc")
 			}
 			buf = append(buf, pad[:padLen]...)
 		}
 	}
-	return buf
+	return buf, nil
 }
 
-func DeserializeSerDes(serdesType string, list []byte) SerDes {
+/*
+Routine which helps to deserialize. used in AttrList Deserialize()
+*/
+func DeserializeSerDes(serdesType string, list []byte) (SerDes, error) {
 	switch serdesType {
 	case "U8Type":
 		attr := new(U8Type)
-		attr.Deserialize(list)
-		return attr
+		err := attr.Deserialize(list)
+		if err != nil {
+			return nil, err
+		}
+		return attr, nil
 	case "U16Type":
 		attr := new(U16Type)
-		attr.Deserialize(list)
-		return attr
+		err := attr.Deserialize(list)
+		if err != nil {
+			return nil, err
+		}
+		return attr, nil
 	case "U32Type":
 		attr := new(U32Type)
-		attr.Deserialize(list)
-		return attr
+		err := attr.Deserialize(list)
+		if err != nil {
+			return nil, err
+		}
+		return attr, nil
 	case "U64Type":
 		attr := new(U64Type)
-		attr.Deserialize(list)
-		return attr
+		err := attr.Deserialize(list)
+		if err != nil {
+			return nil, err
+		}
+		return attr, nil
 	case "I32Type":
 		attr := new(I32Type)
-		attr.Deserialize(list)
-		return attr
+		err := attr.Deserialize(list)
+		if err != nil {
+			return nil, err
+		}
+		return attr, nil
 	case "Net16Type":
 		attr := new(Net16Type)
-		attr.Deserialize(list)
-		return attr
+		err := attr.Deserialize(list)
+		if err != nil {
+			return nil, err
+		}
+		return attr, nil
 	case "Net32Type":
 		attr := new(Net32Type)
-		attr.Deserialize(list)
-		return attr
+		err := attr.Deserialize(list)
+		if err != nil {
+			return nil, err
+		}
+		return attr, nil
 	case "NulStringType":
 		attr := new(NulStringType)
-		attr.Deserialize(list)
-		return attr
+		err := attr.Deserialize(list)
+		if err != nil {
+			return nil, err
+		}
+		return attr, nil
 	case "IgnoreType":
 		attr := new(IgnoreType)
-		return attr
+		return attr, nil
 	case "BinaryType":
 		attr := new(BinaryType)
+		//binary always return nil, no point to check err != nil
 		attr.Deserialize(list)
-		return attr
+		return attr, nil
 	/*
 		XXX(tehnerd): dangerous assumption that we either have basic types (above) or it's
 		a nested attribute's list. havent tested in prod yet
@@ -429,23 +513,25 @@ func DeserializeSerDes(serdesType string, list []byte) SerDes {
 	default:
 		atl, exists := ATLName2ATL[serdesType]
 		if !exists {
-			fmt.Println("serdes doesnt exists. type: ", serdesType)
+			return nil, fmt.Errorf("serdes doesnt exists. type: %v\n", serdesType)
 		}
 		attr := CreateAttrListType(atl)
-		attr.Deserialize(list)
-		return &attr
+		err := attr.Deserialize(list)
+		if err != nil {
+			return nil, err
+		}
+		return &attr, nil
 	}
-	return nil
+	return nil, nil
 }
 
-func (al *AttrListType) Deserialize(list []byte) {
+func (al *AttrListType) Deserialize(list []byte) error {
 	al.Amap = make(map[string]SerDes)
 	var attrHdr AttrHdr
 	for len(list) > 0 {
 		err := binary.Read(bytes.NewReader(list), binary.LittleEndian, &attrHdr)
 		if err != nil {
-			fmt.Println(err)
-			panic("cant read attr header for deserialization")
+			return fmt.Errorf("cant read attr header for deserialization: %v\n", err)
 		}
 		//XXX(tehnerd): again fb's hacks
 		attrHdr.Len = attrHdr.Len & 0x7fff
@@ -455,14 +541,15 @@ func (al *AttrListType) Deserialize(list []byte) {
 			list = list[(int(attrHdr.Len+3) & (^3)):]
 			//TODO(tehnerd): hack. had panics on ipvs's PE_NAME
 			continue
-			fmt.Printf("attr hdr is: %#v\n", attrHdr)
-			fmt.Printf("Key2Type is: %#v\n", al.Key2Type)
-			panic("msg and attrList incompatible")
 		}
 		fieldName := al.Key2name[int(attrHdr.Num)]
-		al.Amap[fieldName] = DeserializeSerDes(fieldType, list[4:attrHdr.Len])
+		al.Amap[fieldName], err = DeserializeSerDes(fieldType, list[4:attrHdr.Len])
+		if err != nil {
+			return err
+		}
 		list = list[(int(attrHdr.Len+3) & (^3)):]
 	}
+	return nil
 }
 
 func (al *AttrListType) Val() {
@@ -472,6 +559,10 @@ func (al *AttrListType) Val() {
 	}
 }
 
+/*
+Struct, which describes how generic netlink message for particular family
+could looks like
+*/
 type MessageType struct {
 	Name2key         map[string]int
 	Key2name         map[int]string
@@ -484,6 +575,9 @@ type AttrListTuple struct {
 	AttrList AttrListType
 }
 
+/*
+Routine, which helps us to create global dict of msg types
+*/
 func CreateMsgType(alist []AttrListTuple, familyId uint16) MessageType {
 	if v, exists := Family2MT[familyId]; exists {
 		return *v
@@ -494,6 +588,9 @@ func CreateMsgType(alist []AttrListTuple, familyId uint16) MessageType {
 	return mt
 }
 
+/*
+Routine, which helps us to resolve family's name to ID on startup
+*/
 func LookupTypeOnStartup(alist []AttrListTuple, familyName string) {
 	LookupOnStartup[familyName] = alist
 }
@@ -513,7 +610,6 @@ func (mt *MessageType) InitMessageType(alist []AttrListTuple, familyId uint16) {
 }
 
 //GNL - generic netlink msg. NL msg contains NLmsgHdr + GNLMsg
-
 type GNLMsgHdr struct {
 	Cmnd    uint8
 	Version uint8
@@ -535,12 +631,11 @@ func (msg *GNLMessage) Init(hdr GNLMsgHdr, amap map[string]SerDes,
 	msg.Flags = flags
 }
 
-func (mt *MessageType) InitGNLMessageStr(cmnd string, flags uint16) GNLMessage {
+func (mt *MessageType) InitGNLMessageStr(cmnd string, flags uint16) (GNLMessage, error) {
 	var gnlMsg GNLMessage
 	cmndId, exists := mt.Name2key[cmnd]
 	if !exists {
-		fmt.Printf("cmnd with name %s doesnt exists\n", cmnd)
-		panic("no such cmnd")
+		return gnlMsg, fmt.Errorf("cmnd with name %s doesnt exists\n", cmnd)
 	}
 	amap := make(map[string]SerDes)
 	gnlMsg.Init(GNLMsgHdr{Cmnd: uint8(cmndId), Version: 1},
@@ -548,7 +643,7 @@ func (mt *MessageType) InitGNLMessageStr(cmnd string, flags uint16) GNLMessage {
 		mt.Family,
 		flags)
 	gnlMsg.MT = mt
-	return gnlMsg
+	return gnlMsg, nil
 }
 
 func (msg *GNLMessage) GetAttrList(name string) SerDes {
@@ -559,45 +654,47 @@ func (msg *GNLMessage) SetAttrList(name string, val SerDes) {
 	msg.AttrMap[name] = val
 }
 
-func (mt *MessageType) SerializeGNLMsg(msg GNLMessage) []byte {
+func (mt *MessageType) SerializeGNLMsg(msg GNLMessage) ([]byte, error) {
 	sMsg := make([]byte, 0)
 	buf := new(bytes.Buffer)
 	err := binary.Write(buf, binary.LittleEndian, msg.Hdr)
 	if err != nil {
-		fmt.Println(err)
-		panic("cant serialize msg hdr")
+		return nil, fmt.Errorf("cant serialize gnlmsg hdr: %v\n", err)
 	}
 	sMsg = append(sMsg, buf.Bytes()...)
 	//padding
 	sMsg = append(sMsg, []byte{0, 0}...)
 	if v, exists := mt.Key2attrListType[int(msg.Hdr.Cmnd)]; !exists {
-		fmt.Printf("no existing cmnd in %#v\n", msg.Hdr)
-		panic("no such cmnd in key2attrlist dict")
+		return nil, fmt.Errorf("no existing cmnd in %#v\n", msg.Hdr)
 	} else {
 		v.Set(msg.AttrMap)
-		sMsg = append(sMsg, v.Serialize()...)
+		vSer, err := v.Serialize()
+		if err != nil {
+			return nil, err
+		}
+		sMsg = append(sMsg, vSer...)
 	}
-	return sMsg
+	return sMsg, nil
 }
 
-func (mt *MessageType) DeserializeGNLMsg(sMsg []byte) GNLMessage {
+func (mt *MessageType) DeserializeGNLMsg(sMsg []byte) (GNLMessage, error) {
 	var msgHdr GNLMsgHdr
 	err := binary.Read(bytes.NewReader(sMsg), binary.LittleEndian, &msgHdr)
 	if err != nil {
-		fmt.Println(err)
-		panic("cant read(deserialize) msg hdr")
+		return GNLMessage{}, fmt.Errorf("cant read(deserialize) msg hdr: %v\n", err)
 	}
 	v, exists := mt.Key2attrListType[int(msgHdr.Cmnd)]
 	if !exists {
-		fmt.Printf("messageType is : %#v\n", mt)
-		fmt.Printf("non existing cmnd: %#v\n", msgHdr)
-		fmt.Printf("key2attr list: %#v\n", mt.Key2attrListType)
-		panic("no such cmnd in key2attrlist dict")
+		return GNLMessage{}, fmt.Errorf("no such cmnd in key2attrlist dict: %#v\nkey2attrlist: %#v\n",
+			msgHdr, mt.Key2attrListType)
 	}
-	v.Deserialize(sMsg[4:])
+	err = v.Deserialize(sMsg[4:])
+	if err != nil {
+		return GNLMessage{}, err
+	}
 	var msg GNLMessage
 	msg.Init(msgHdr, v.Amap, 1, ACK_REQUEST)
-	return msg
+	return msg, nil
 }
 
 type NLMsgHdr struct {
@@ -608,9 +705,12 @@ type NLMsgHdr struct {
 	PortID   uint32
 }
 
-func SerializeNLMsg(mt *MessageType, msg GNLMessage, portId, Seq uint32) []byte {
+func SerializeNLMsg(mt *MessageType, msg GNLMessage, portId, Seq uint32) ([]byte, error) {
 	nlMsg := make([]byte, 0)
-	payload := mt.SerializeGNLMsg(msg)
+	payload, err := mt.SerializeGNLMsg(msg)
+	if err != nil {
+		return nil, err
+	}
 	nlHdr := NLMsgHdr{
 		TotalLen: uint32(len(payload) + 16),
 		Family:   msg.Family,
@@ -618,51 +718,54 @@ func SerializeNLMsg(mt *MessageType, msg GNLMessage, portId, Seq uint32) []byte 
 		Seq:      Seq,
 		PortID:   portId}
 	buf := new(bytes.Buffer)
-	err := binary.Write(buf, binary.LittleEndian, nlHdr)
+	err = binary.Write(buf, binary.LittleEndian, nlHdr)
 	if err != nil {
-		fmt.Println(err)
-		panic("cant serialize nl msg hdr")
+		return nil, err
 	}
 	nlMsg = append(nlMsg, buf.Bytes()...)
 	nlMsg = append(nlMsg, payload...)
-	return nlMsg
+	return nlMsg, nil
 }
 
-func DeserializeNLMsg(sMsg []byte) (GNLMessage, []byte) {
+func DeserializeNLMsg(sMsg []byte) (GNLMessage, []byte, error) {
 	var nlHdr NLMsgHdr
 	err := binary.Read(bytes.NewReader(sMsg), binary.LittleEndian, &nlHdr)
 	if err != nil {
-		fmt.Println(err)
-		panic("cant deserialize nl msg hdr")
+		return GNLMessage{}, nil, err
 	}
 	mt, exists := Family2MT[nlHdr.Family]
 	if !exists {
-		fmt.Printf("hdr is: %#v\n", nlHdr)
-		panic("msg with such family doesn exist in mType dict")
+		return GNLMessage{}, nil,
+			fmt.Errorf("msg with such family doesn exist in mType dict: %#v\n", nlHdr)
 	}
 	if nlHdr.Family == ErrorMessageType {
 		var ErrorCode int32
 		binary.Read(bytes.NewReader(sMsg[16:]), binary.LittleEndian, &ErrorCode)
 		if ErrorCode != 0 {
 			fmt.Println("ErrorCode is: ", -ErrorCode)
-			if len(sMsg) > 20 {
-				emsg, _ := DeserializeNLMsg(sMsg[20:])
-				fmt.Printf("%#v\n", emsg)
-			}
-			panic("recved error msg")
+			/*
+				TODO(tehnerd): we could return which msg was the reason of error
+				if len(sMsg) > 20 {
+					_, _, err := DeserializeNLMsg(sMsg[20:])
+				}
+			*/
+			return GNLMessage{}, nil, fmt.Errorf("Error! errorcode is: %d\n", -ErrorCode)
 		} else {
-			return GNLMessage{}, nil
+			return GNLMessage{}, nil, nil
 		}
 	} else if nlHdr.Family == DoneMessageType {
 		var msg GNLMessage
 		msg.Family = nlHdr.Family
 		msg.Flags = nlHdr.Flags
-		return msg, nil
+		return msg, nil, nil
 	}
-	msg := mt.DeserializeGNLMsg(sMsg[16:])
+	msg, err := mt.DeserializeGNLMsg(sMsg[16:])
+	if err != nil {
+		return GNLMessage{}, nil, err
+	}
 	msg.Family = nlHdr.Family
 	msg.Flags = nlHdr.Flags
-	return msg, sMsg[nlHdr.TotalLen:]
+	return msg, sMsg[nlHdr.TotalLen:], nil
 
 }
 
@@ -674,11 +777,11 @@ type NLSocket struct {
 	Verbose bool
 }
 
-func (nlSock *NLSocket) Init() {
+func (nlSock *NLSocket) Init() error {
 	//16 - NETLINK_GENERIC
-	sd, err := syscall.Socket(syscall.AF_NETLINK, syscall.SOCK_DGRAM, 16)
+	sd, err := syscall.Socket(syscall.AF_NETLINK, syscall.SOCK_DGRAM, NETLINK_GENERIC)
 	if err != nil {
-		panic("cant create netlink socket")
+		return fmt.Errorf("cant create netlink socket %v\n", err)
 	}
 	pid := uint32(syscall.Getpid())
 	sa := &syscall.SockaddrNetlink{
@@ -686,86 +789,114 @@ func (nlSock *NLSocket) Init() {
 		Groups: 0,
 		Family: syscall.AF_NETLINK}
 	if err = syscall.Bind(sd, sa); err != nil {
-		panic("cant bind to netlink socket")
+		return fmt.Errorf("cant bind to netlink socket: %v\n", err)
 	}
 	nlSock.Lock = new(sync.Mutex)
 	nlSock.Sd = sd
 	nlSock.Seq = 0
 	nlSock.PortID = pid
 	for k, v := range LookupOnStartup {
-		familyId := nlSock.ResolveFamily(NulStringType(k))
+		familyId, err := nlSock.ResolveFamily(NulStringType(k))
+		if err != nil {
+			return err
+		}
 		CreateMsgType(v, uint16(*familyId))
 		MT2Family[k] = uint16(*familyId)
 	}
+	return nil
 }
 
 func (nlSock *NLSocket) Close() {
 	syscall.Close(nlSock.Sd)
 }
 
-func (nlSock *NLSocket) ResolveFamily(family NulStringType) *U16Type {
-	gnlMsg := CtrlMessage.InitGNLMessageStr("GETFAMILY", REQUEST)
+func (nlSock *NLSocket) ResolveFamily(family NulStringType) (*U16Type, error) {
+	gnlMsg, err := CtrlMessage.InitGNLMessageStr("GETFAMILY", REQUEST)
+	if err != nil {
+		return nil, err
+	}
 	gnlMsg.SetAttrList("FAMILY_NAME", &family)
-	reply := nlSock.Query(gnlMsg)
+	reply, err := nlSock.Query(gnlMsg)
+	if err != nil {
+		return nil, err
+	}
 	familyId := reply[0].GetAttrList("FAMILY_ID")
-	//wea re going to panic if it's  not U16Type
-	return familyId.(*U16Type)
+	//we are going to panic if it's  not U16Typ
+	familyIdPtr, ok := familyId.(*U16Type)
+	if !ok {
+		return nil, fmt.Errorf("cant convert familyId to U16Type")
+	}
+	return familyIdPtr, nil
 }
 
-func (nlSock *NLSocket) Query(msg GNLMessage) []GNLMessage {
+func (nlSock *NLSocket) Query(msg GNLMessage) ([]GNLMessage, error) {
 	nlSock.Lock.Lock()
 	defer nlSock.Lock.Unlock()
 	nlSock.send(msg)
-	resp := nlSock.recv()
-	return resp
+	resp, err := nlSock.recv()
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
-func (nlSock *NLSocket) send(msg GNLMessage) {
-	data := SerializeNLMsg(msg.MT, msg, nlSock.PortID, nlSock.Seq)
+func (nlSock *NLSocket) send(msg GNLMessage) error {
+	data, err := SerializeNLMsg(msg.MT, msg, nlSock.PortID, nlSock.Seq)
+	if err != nil {
+		return err
+	}
 	nlSock.Seq += 1
 	lsa := &syscall.SockaddrNetlink{Family: syscall.AF_NETLINK}
-	err := syscall.Sendto(nlSock.Sd, data, 0, lsa)
+	err = syscall.Sendto(nlSock.Sd, data, 0, lsa)
 	if err != nil {
-		fmt.Println(err)
-		panic("cant send to netlink socket")
+		return err
 	}
+	return nil
 }
 
-func (nlSock *NLSocket) recv() []GNLMessage {
+func (nlSock *NLSocket) recv() ([]GNLMessage, error) {
 	buff := make([]byte, 16384)
 	var msgsList []GNLMessage
 	for {
-		//TODO(tehnerd): nonblocking(so we could loop around it), if 16384 wont be enough
 		n, _, err := syscall.Recvfrom(nlSock.Sd, buff, 0)
 		if err != nil {
-			fmt.Println(err)
-			panic("cand read from socket")
+			return nil, err
 		}
 		resp := buff[:n]
 		for len(resp) > 0 {
-			rmsg, data := DeserializeNLMsg(resp)
+			rmsg, data, err := DeserializeNLMsg(resp)
+			if err != nil {
+				return nil, err
+			}
 			if len(msgsList) == 0 && rmsg.Flags&0x2 == 0 {
-				return []GNLMessage{rmsg}
+				return []GNLMessage{rmsg}, nil
 			} else if rmsg.Family == DoneMessageType {
-				return msgsList
+				return msgsList, nil
 			}
 			msgsList = append(msgsList, rmsg)
 			resp = data
 		}
 
 	}
-	return msgsList
+	return msgsList, nil
 }
 
-func (nlSock *NLSocket) Execute(msg GNLMessage) {
+func (nlSock *NLSocket) Execute(msg GNLMessage) error {
 	nlSock.Lock.Lock()
 	defer nlSock.Lock.Unlock()
-	nlSock.send(msg)
-	resp := nlSock.recv()
+	err := nlSock.send(msg)
+	if err != nil {
+		return err
+	}
+	resp, err := nlSock.recv()
+	if err != nil {
+		return err
+	}
 	if len(resp) != 1 {
-		panic("we dont expect more than one msg in response")
+		return fmt.Errorf("we dont expect more than one msg in response\n")
 	}
 	if resp[0].Family == ErrorMessageType {
-		panic("error in response of execution")
+		return fmt.Errorf("error in response of execution\n")
 	}
+	return nil
 }
