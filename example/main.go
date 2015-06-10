@@ -40,12 +40,13 @@ func main() {
 	ipvs.DelFWMService(2, 2)
 	ipvs.AddService("192.168.1.1", 80, uint16(gnl2go.ToProtoNum("tcp")), "wrr")
 	ipvs.AddDest("192.168.1.1", 80, "127.0.0.11", uint16(gnl2go.ToProtoNum("tcp")), 10)
+	ipvs.AddDestPort("192.168.1.1", 80, "127.0.0.11", 8080, uint16(gnl2go.ToProtoNum("tcp")), 10, gnl2go.IPVS_MASQUERADING)
 	ipvs.AddDest("192.168.1.1", 80, "127.0.0.12", uint16(gnl2go.ToProtoNum("tcp")), 10)
 	ipvs.AddDest("192.168.1.1", 80, "127.0.0.13", uint16(gnl2go.ToProtoNum("tcp")), 10)
 	ipvs.UpdateDest("192.168.1.1", 80, "127.0.0.13", uint16(gnl2go.ToProtoNum("tcp")), 20)
 	ipvs.DelDest("192.168.1.1", 80, "127.0.0.12", uint16(gnl2go.ToProtoNum("tcp")))
 	ipvs.AddFWMService(1, "wrr", 10)
-	ipvs.AddFWMDest(1, "fc00:1::12", 10, 0, 10)
+	ipvs.AddFWMDestFWD(1, "fc00:1::12", 10, 0, 10, gnl2go.IPVS_MASQUERADING)
 	err = ipvs.AddFWMDest(10, "fc00:1::12", 10, 0, 10)
 	//Expected: there is no service with fwmark 2
 	if err != nil {

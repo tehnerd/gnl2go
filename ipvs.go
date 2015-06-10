@@ -23,21 +23,32 @@ err := ipvs.AddFWMService(fwmark_uint32,sched_string,af_uint16) - add fwmark ser
 
 err := ipvs.DelFWMService(fwmark_uint32,af_uint16) - delete fwmark service
 
-err := ipvs.AddDest(vip_string,port_uint16,rip_string,protocol_uint16,weight_int32) - add destination rip to vip.
-	BEWARE: right now there is few limitation, which probably will be removed in future (it's trivial to, but api(func call) will be
-	changed). Right now the limitation is: only tunneling supported as a way to send traffic from LVS SLB to real server.
-	Port number on real server must be the same as in service definition (right now we cant have VIP:80 -> RIP:8080)
+err := ipvs.AddDest(vip_string,port_uint16,rip_string,protocol_uint16,weight_int32) - add destination rip to vip. port on vip and rip is the same
+	fwding methond - tunneling
+
+err := ipvs.AddDestPort(vip_string,vport_uint16,rip_string,rport_uint16,protocol_uint16,weight_int32,fwd_uint32) - add destination rip to vip.
+	port on vip and rip could be different. fwding method could be any supported (for example IPVS_MASQUERADING)
 
 err := ipvs.UpdateDest(vip_string,port_uint16,rip_string,protocol_uint16,weight_int32) - change description of real server(for example
 	change it's weight)
 
+err := ipvs.UpdateDestPort(vip_string,vport_uint16,rip_string,rport_uint16, protocol_uint16,weight_int32,fwd_uint32) - same as above
+	but with custom ports on real and fwd method
+
 err := ipvs.DelDest(vip_string,port_uint16,rip_string,protocol_uint16)
 
+err := ipvs.DelDestPort(vip_string,vport_uint16,rip_string,rport_uint16, protocol_uint16)
+
+
 err := ipvs.AddFWMDest(fwmark_uint32,rip_string,vaf_uint16,port_uint16,weight_int32) - add destination to fwmark bassed service,
-	vaf - fwmark's service address family. BEWARE: only tunneling supported as for now (check limitation above). any port could be used
-	on real's side
+	vaf - fwmark's service address family.
+
+err := ipvs.AddFWMDestFWD(fwmark_uint32,rip_string,vaf_uint16,port_uint16,weight_int32,fwd_uint32) - add destination to fwmark bassed service,
+	vaf - fwmark's service address family. fwd - forwarding method (tunneling or nat/masquerading)
 
 err := ipvs.UpdateFWMDest(fwmark_uint32,rip_string,vaf_uint16,port_uint16,weight_int32)
+
+err := ipvs.UpdateFWMDestFWD(fwmark_uint32,rip_string,vaf_uint16,port_uint16,weight_int32,fwd_uint32)
 
 err := DelFWMDest(fwmark_uint32,rip_string,vaf_uint16,port_uint16)
 
@@ -54,7 +65,8 @@ import (
 )
 
 const (
-	IPVS_TUNNELING = 2
+	IPVS_MASQUERADING = 0
+	IPVS_TUNNELING    = 2
 )
 
 var (
@@ -508,8 +520,8 @@ func (ipvs *IpvsClient) DelFWMService(fwmark uint32, af uint16) error {
 	return nil
 }
 
-func (ipvs *IpvsClient) modifyDest(method string, vip string, port uint16,
-	rip string, protocol uint16, amap map[string]SerDes) error {
+func (ipvs *IpvsClient) modifyDest(method string, vip string, vport uint16,
+	rip string, rport uint16, protocol uint16, amap map[string]SerDes) error {
 	//starts with r - for real's related, v - for vip's
 	vaf, vaddr, err := toAFUnion(vip)
 	if err != nil {
@@ -528,7 +540,8 @@ func (ipvs *IpvsClient) modifyDest(method string, vip string, port uint16,
 	rAF := U16Type(raf)
 	rAddr := BinaryType(raddr)
 
-	Port := Net16Type(port)
+	VPort := Net16Type(vport)
+	RPort := Net16Type(rport)
 	Proto := U16Type(protocol)
 
 	vatl, _ := ATLName2ATL["IpvsServiceAttrList"]
@@ -537,7 +550,7 @@ func (ipvs *IpvsClient) modifyDest(method string, vip string, port uint16,
 	rattr := CreateAttrListType(ratl)
 
 	sattr.Amap["AF"] = &vAF
-	sattr.Amap["PORT"] = &Port
+	sattr.Amap["PORT"] = &VPort
 	sattr.Amap["PROTOCOL"] = &Proto
 	sattr.Amap["ADDR"] = &vAddr
 
@@ -546,7 +559,7 @@ func (ipvs *IpvsClient) modifyDest(method string, vip string, port uint16,
 		for example in param map you could override amap["PORT"]
 	*/
 	rattr.Amap["ADDR_FAMILY"] = &rAF
-	rattr.Amap["PORT"] = &Port
+	rattr.Amap["PORT"] = &RPort
 	rattr.Amap["ADDR"] = &rAddr
 
 	for k, v := range amap {
@@ -564,17 +577,22 @@ func (ipvs *IpvsClient) modifyDest(method string, vip string, port uint16,
 
 func (ipvs *IpvsClient) AddDest(vip string, port uint16, rip string,
 	protocol uint16, weight int32) error {
+	return ipvs.AddDestPort(vip, port, rip, port, protocol, weight, IPVS_TUNNELING)
+}
+
+func (ipvs *IpvsClient) AddDestPort(vip string, vport uint16, rip string,
+	rport uint16, protocol uint16, weight int32, fwd uint32) error {
 	paramsMap := make(map[string]SerDes)
 	Weight := I32Type(weight)
 	//XXX(tehnerd): hardcode, but easy to fix; 2 - tunneling
-	FWDMethod := U32Type(IPVS_TUNNELING)
+	FWDMethod := U32Type(fwd)
 	LThresh := U32Type(0)
 	UThresh := U32Type(0)
 	paramsMap["WEIGHT"] = &Weight
 	paramsMap["FWD_METHOD"] = &FWDMethod
 	paramsMap["L_THRESH"] = &LThresh
 	paramsMap["U_THRESH"] = &UThresh
-	err := ipvs.modifyDest("NEW_DEST", vip, port, rip, protocol, paramsMap)
+	err := ipvs.modifyDest("NEW_DEST", vip, vport, rip, rport, protocol, paramsMap)
 	if err != nil {
 		return err
 	}
@@ -583,17 +601,22 @@ func (ipvs *IpvsClient) AddDest(vip string, port uint16, rip string,
 
 func (ipvs *IpvsClient) UpdateDest(vip string, port uint16, rip string,
 	protocol uint16, weight int32) error {
+	return ipvs.UpdateDestPort(vip, port, rip, port, protocol, weight, IPVS_TUNNELING)
+}
+
+func (ipvs *IpvsClient) UpdateDestPort(vip string, vport uint16, rip string,
+	rport uint16, protocol uint16, weight int32, fwd uint32) error {
 	paramsMap := make(map[string]SerDes)
 	Weight := I32Type(weight)
 	//XXX(tehnerd): hardcode, but easy to fix; 2 - tunneling
-	FWDMethod := U32Type(IPVS_TUNNELING)
+	FWDMethod := U32Type(fwd)
 	LThresh := U32Type(0)
 	UThresh := U32Type(0)
 	paramsMap["WEIGHT"] = &Weight
 	paramsMap["FWD_METHOD"] = &FWDMethod
 	paramsMap["L_THRESH"] = &LThresh
 	paramsMap["U_THRESH"] = &UThresh
-	err := ipvs.modifyDest("SET_DEST", vip, port, rip, protocol, paramsMap)
+	err := ipvs.modifyDest("SET_DEST", vip, vport, rip, rport, protocol, paramsMap)
 	if err != nil {
 		return err
 	}
@@ -602,7 +625,12 @@ func (ipvs *IpvsClient) UpdateDest(vip string, port uint16, rip string,
 
 func (ipvs *IpvsClient) DelDest(vip string, port uint16, rip string,
 	protocol uint16) error {
-	err := ipvs.modifyDest("DEL_DEST", vip, port, rip, protocol, nil)
+	return ipvs.DelDestPort(vip, port, rip, port, protocol)
+}
+
+func (ipvs *IpvsClient) DelDestPort(vip string, vport uint16, rip string,
+	rport uint16, protocol uint16) error {
+	err := ipvs.modifyDest("DEL_DEST", vip, vport, rip, rport, protocol, nil)
 	if err != nil {
 		return err
 	}
@@ -658,12 +686,18 @@ func (ipvs *IpvsClient) modifyFWMDest(method string, fwmark uint32,
 	rip string, vaf uint16, port uint16, amap map[string]SerDes) {
 
 */
+
 func (ipvs *IpvsClient) AddFWMDest(fwmark uint32, rip string, vaf uint16,
 	port uint16, weight int32) error {
+	return ipvs.AddFWMDestFWD(fwmark, rip, vaf, port, weight, IPVS_TUNNELING)
+}
+
+func (ipvs *IpvsClient) AddFWMDestFWD(fwmark uint32, rip string, vaf uint16,
+	port uint16, weight int32, fwd uint32) error {
 	paramsMap := make(map[string]SerDes)
 	Weight := I32Type(weight)
 	//XXX(tehnerd): hardcode, but easy to fix; 2 - tunneling
-	FWDMethod := U32Type(IPVS_TUNNELING)
+	FWDMethod := U32Type(fwd)
 	LThresh := U32Type(0)
 	UThresh := U32Type(0)
 	paramsMap["WEIGHT"] = &Weight
@@ -676,13 +710,17 @@ func (ipvs *IpvsClient) AddFWMDest(fwmark uint32, rip string, vaf uint16,
 	}
 	return nil
 }
-
 func (ipvs *IpvsClient) UpdateFWMDest(fwmark uint32, rip string, vaf uint16,
 	port uint16, weight int32) error {
+	return ipvs.UpdateFWMDestFWD(fwmark, rip, vaf, port, weight, IPVS_TUNNELING)
+}
+
+func (ipvs *IpvsClient) UpdateFWMDestFWD(fwmark uint32, rip string, vaf uint16,
+	port uint16, weight int32, fwd uint32) error {
 	paramsMap := make(map[string]SerDes)
 	Weight := I32Type(weight)
 	//XXX(tehnerd): hardcode, but easy to fix; 2 - tunneling
-	FWDMethod := U32Type(IPVS_TUNNELING)
+	FWDMethod := U32Type(fwd)
 	LThresh := U32Type(0)
 	UThresh := U32Type(0)
 	paramsMap["WEIGHT"] = &Weight
