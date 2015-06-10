@@ -742,7 +742,6 @@ func DeserializeNLMsg(sMsg []byte) (GNLMessage, []byte, error) {
 		var ErrorCode int32
 		binary.Read(bytes.NewReader(sMsg[16:]), binary.LittleEndian, &ErrorCode)
 		if ErrorCode != 0 {
-			fmt.Println("ErrorCode is: ", -ErrorCode)
 			/*
 				TODO(tehnerd): we could return which msg was the reason of error
 				if len(sMsg) > 20 {
