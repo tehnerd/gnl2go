@@ -84,6 +84,20 @@ var (
 			AttrTuple{Name: "OUTBPS", Type: "U32Type"},
 		})
 
+	IpvsStats64AttrList = CreateAttrListDefinition("IpvsStats64AttrList",
+		[]AttrTuple{
+			AttrTuple{Name: "CONNS", Type: "U64Type"},
+			AttrTuple{Name: "INPKTS", Type: "U64Type"},
+			AttrTuple{Name: "OUTPKTS", Type: "U64Type"},
+			AttrTuple{Name: "INBYTES", Type: "U64Type"},
+			AttrTuple{Name: "OUTBYTES", Type: "U64Type"},
+			AttrTuple{Name: "CPS", Type: "U64Type"},
+			AttrTuple{Name: "INPPS", Type: "U64Type"},
+			AttrTuple{Name: "OUTPPS", Type: "U64Type"},
+			AttrTuple{Name: "INBPS", Type: "U64Type"},
+			AttrTuple{Name: "OUTBPS", Type: "U64Type"},
+		})
+
 	IpvsServiceAttrList = CreateAttrListDefinition("IpvsServiceAttrList",
 		[]AttrTuple{
 			AttrTuple{Name: "AF", Type: "U16Type"},
@@ -97,6 +111,7 @@ var (
 			AttrTuple{Name: "NETMASK", Type: "U32Type"},
 			AttrTuple{Name: "STATS", Type: "IpvsStatsAttrList"},
 			AttrTuple{Name: "PE_NAME", Type: "NulStringType"},
+			AttrTuple{Name: "STATS64", Type: "IpvsStats64AttrList"},
 		})
 
 	IpvsDestAttrList = CreateAttrListDefinition("IpvsDestAttrList",
@@ -112,6 +127,7 @@ var (
 			AttrTuple{Name: "PERSIST_CONNS", Type: "U32Type"},
 			AttrTuple{Name: "STATS", Type: "IpvsStatsAttrList"},
 			AttrTuple{Name: "ADDR_FAMILY", Type: "U16Type"},
+			AttrTuple{Name: "STATS64", Type: "IpvsStats64AttrList"},
 		})
 
 	IpvsDaemonAttrList = CreateAttrListDefinition("IpvsDaemonAttrList",
@@ -337,6 +353,114 @@ func (p *Pool) InitFromAttrList(list map[string]SerDes) {
 	//TODO(tehnerd):...
 }
 
+type StatsIntf interface {
+	GetStats() map[string]uint64
+}
+
+type Stats struct {
+	Conns    uint32
+	Inpkts   uint32
+	Outpkts  uint32
+	Inbytes  uint64
+	Outbytes uint64
+	Cps      uint32
+	Inpps    uint32
+	Outpps   uint32
+	Inbps    uint32
+	Outbps   uint32
+}
+
+func (stats *Stats) InitFromAttrList(list map[string]SerDes) {
+	//not tested
+	conns := list["CONNS"].(*U32Type)
+	inpkts := list["INPKTS"].(*U32Type)
+	outpkts := list["OUTPKTS"].(*U32Type)
+	inbytes := list["INBYTES"].(*U64Type)
+	outbytes := list["OUTBYTES"].(*U64Type)
+	cps := list["CPS"].(*U32Type)
+	inpps := list["INPPS"].(*U32Type)
+	outpps := list["OUTPPS"].(*U32Type)
+	inbps := list["INBPS"].(*U32Type)
+	outbps := list["OUTBPS"].(*U32Type)
+	stats.Conns = uint32(*conns)
+	stats.Inpkts = uint32(*inpkts)
+	stats.Outpps = uint32(*outpkts)
+	stats.Inbytes = uint64(*inbytes)
+	stats.Outbytes = uint64(*outbytes)
+	stats.Cps = uint32(*cps)
+	stats.Inpps = uint32(*inpps)
+	stats.Outpps = uint32(*outpps)
+	stats.Inbps = uint32(*inbps)
+	stats.Outbps = uint32(*outbps)
+}
+
+func (stats Stats) GetStats() map[string]uint64 {
+	statsMap := make(map[string]uint64)
+	statsMap["CONNS"] = uint64(stats.Conns)
+	statsMap["INPKTS"] = uint64(stats.Inpkts)
+	statsMap["OUTPKTS"] = uint64(stats.Outpkts)
+	statsMap["INBYTES"] = uint64(stats.Inbytes)
+	statsMap["OYTBYTES"] = uint64(stats.Outbytes)
+	statsMap["CPS"] = uint64(stats.Cps)
+	statsMap["INPPS"] = uint64(stats.Inpps)
+	statsMap["OUTPPS"] = uint64(stats.Outpps)
+	statsMap["INBPS"] = uint64(stats.Inbps)
+	statsMap["OUTBPS"] = uint64(stats.Outbps)
+	return statsMap
+}
+
+type Stats64 struct {
+	Conns    uint64
+	Inpkts   uint64
+	Outpkts  uint64
+	Inbytes  uint64
+	Outbytes uint64
+	Cps      uint64
+	Inpps    uint64
+	Outpps   uint64
+	Inbps    uint64
+	Outbps   uint64
+}
+
+func (stats *Stats64) InitFromAttrList(list map[string]SerDes) {
+	//not tested
+	conns := list["CONNS"].(*U64Type)
+	inpkts := list["INPKTS"].(*U64Type)
+	outpkts := list["OUTPKTS"].(*U64Type)
+	inbytes := list["INBYTES"].(*U64Type)
+	outbytes := list["OUTBYTES"].(*U64Type)
+	cps := list["CPS"].(*U64Type)
+	inpps := list["INPPS"].(*U64Type)
+	outpps := list["OUTPPS"].(*U64Type)
+	inbps := list["INBPS"].(*U64Type)
+	outbps := list["OUTBPS"].(*U64Type)
+	stats.Conns = uint64(*conns)
+	stats.Inpkts = uint64(*inpkts)
+	stats.Outpps = uint64(*outpkts)
+	stats.Inbytes = uint64(*inbytes)
+	stats.Outbytes = uint64(*outbytes)
+	stats.Cps = uint64(*cps)
+	stats.Inpps = uint64(*inpps)
+	stats.Outpps = uint64(*outpps)
+	stats.Inbps = uint64(*inbps)
+	stats.Outbps = uint64(*outbps)
+}
+
+func (stats Stats64) GetStats() map[string]uint64 {
+	statsMap := make(map[string]uint64)
+	statsMap["CONNS"] = stats.Conns
+	statsMap["INPKTS"] = stats.Inpkts
+	statsMap["OUTPKTS"] = stats.Outpkts
+	statsMap["INBYTES"] = stats.Inbytes
+	statsMap["OYTBYTES"] = stats.Outbytes
+	statsMap["CPS"] = stats.Cps
+	statsMap["INPPS"] = stats.Inpps
+	statsMap["OUTPPS"] = stats.Outpps
+	statsMap["INBPS"] = stats.Inbps
+	statsMap["OUTBPS"] = stats.Outbps
+	return statsMap
+}
+
 type IpvsClient struct {
 	Sock NLSocket
 	mt   *MessageType
@@ -399,6 +523,36 @@ func (ipvs *IpvsClient) GetPools() ([]Pool, error) {
 		pools = append(pools, pool)
 	}
 	return pools, nil
+}
+
+func (ipvs *IpvsClient) GetAllStatsBrief() ([]StatsIntf, error) {
+	//XXX(tehnerd): This is WIP, and return val will change in future. prob to
+	//map[string(service ip)]StatsIntf
+	var statsList []StatsIntf
+	msg, err := ipvs.mt.InitGNLMessageStr("GET_SERVICE", MATCH_ROOT_REQUEST)
+	if err != nil {
+		return nil, err
+	}
+	resps, err := ipvs.Sock.Query(msg)
+	if err != nil {
+		return nil, err
+	}
+	var sstats64 Stats64
+	var sstats Stats
+	for _, resp := range resps {
+		svcAttrList := resp.GetAttrList("SERVICE").(*AttrListType)
+		var statsAttrList SerDes
+		if val, exists := svcAttrList.Amap["STATS64"]; exists {
+			statsAttrList = val
+			sstats64.InitFromAttrList(statsAttrList.(*AttrListType).Amap)
+			statsList = append(statsList, sstats64)
+		} else {
+			statsAttrList = svcAttrList.Amap["STATS"]
+			sstats.InitFromAttrList(statsAttrList.(*AttrListType).Amap)
+			statsList = append(statsList, sstats)
+		}
+	}
+	return statsList, nil
 }
 
 func (ipvs *IpvsClient) modifyService(method string, vip string,
