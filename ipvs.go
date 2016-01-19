@@ -60,6 +60,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -344,6 +345,35 @@ func (s *Service) InitFromAttrList(list map[string]SerDes) error {
 	return nil
 }
 
+func (s *Service) ToString() string {
+	if s.VIP != "" {
+		port := strconv.FormatUint(uint64(s.Port), 10)
+		proto := ""
+		switch s.Proto {
+		case syscall.IPPROTO_TCP:
+			proto = "tcp"
+		case syscall.IPPROTO_UDP:
+			proto = "udp"
+		default:
+			proto = "unknown"
+		}
+		return strings.Join([]string{s.VIP, proto, port}, ":")
+	} else {
+		//fwmark bassed service
+		fwmark := strconv.FormatUint(uint64(s.FWMark), 10)
+		proto := ""
+		switch s.AF {
+		case syscall.AF_INET:
+			proto = "ipv4"
+		case syscall.AF_INET6:
+			proto = "ipv6"
+		default:
+			proto = "unknown"
+		}
+		return strings.Join([]string{"fwmark", proto, fwmark}, ":")
+	}
+}
+
 type Pool struct {
 	Service Service
 	Dests   []Dest
@@ -525,10 +555,24 @@ func (ipvs *IpvsClient) GetPools() ([]Pool, error) {
 	return pools, nil
 }
 
-func (ipvs *IpvsClient) GetAllStatsBrief() ([]StatsIntf, error) {
-	//XXX(tehnerd): This is WIP, and return val will change in future. prob to
-	//map[string(service ip)]StatsIntf
-	var statsList []StatsIntf
+func GetStatsFromAttrList(attrList *AttrListType) StatsIntf {
+	if val, exists := attrList.Amap["STATS64"]; exists {
+		var sstats64 Stats64
+		sstats64.InitFromAttrList(val.(*AttrListType).Amap)
+		return sstats64
+	} else {
+		var sstats Stats
+		statsAttrList := attrList.Amap["STATS"]
+		sstats.InitFromAttrList(statsAttrList.(*AttrListType).Amap)
+		return sstats
+	}
+	//we should never reach this
+	panic("check GetStatsFromAttrList routine")
+	return nil
+}
+
+func (ipvs *IpvsClient) GetAllStatsBrief() (map[string]StatsIntf, error) {
+	statsMap := make(map[string]StatsIntf)
 	msg, err := ipvs.mt.InitGNLMessageStr("GET_SERVICE", MATCH_ROOT_REQUEST)
 	if err != nil {
 		return nil, err
@@ -537,22 +581,14 @@ func (ipvs *IpvsClient) GetAllStatsBrief() ([]StatsIntf, error) {
 	if err != nil {
 		return nil, err
 	}
-	var sstats64 Stats64
-	var sstats Stats
+	var svc Service
 	for _, resp := range resps {
 		svcAttrList := resp.GetAttrList("SERVICE").(*AttrListType)
-		var statsAttrList SerDes
-		if val, exists := svcAttrList.Amap["STATS64"]; exists {
-			statsAttrList = val
-			sstats64.InitFromAttrList(statsAttrList.(*AttrListType).Amap)
-			statsList = append(statsList, sstats64)
-		} else {
-			statsAttrList = svcAttrList.Amap["STATS"]
-			sstats.InitFromAttrList(statsAttrList.(*AttrListType).Amap)
-			statsList = append(statsList, sstats)
-		}
+		svc.InitFromAttrList(svcAttrList.Amap)
+		sstat := GetStatsFromAttrList(svcAttrList)
+		statsMap[svc.ToString()] = sstat
 	}
-	return statsList, nil
+	return statsMap, nil
 }
 
 func (ipvs *IpvsClient) modifyService(method string, vip string,
