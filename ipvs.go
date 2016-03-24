@@ -234,7 +234,7 @@ func fromAFUnion(af uint16, addr []byte) (string, error) {
 		return addrStr, nil
 	}
 	var v4addr uint32
-	//we leftpadded addr to len 16 above,so our v4 addr in addr[12:]
+	//we leftpadded addr to len 16 above,so our v4 addr in addr[:4]
 	err := binary.Read(bytes.NewReader(addr[:4]), binary.BigEndian, &v4addr)
 	if err != nil {
 		return "", fmt.Errorf("cant decode ipv4 addr from net repr:%v\n", err)
@@ -343,6 +343,43 @@ func (s *Service) InitFromAttrList(list map[string]SerDes) error {
 	sched := list["SCHED_NAME"].(*NulStringType)
 	s.Sched = string(*sched)
 	return nil
+}
+
+func (s *Service) CreateAttrList() (map[string]SerDes, error) {
+	attrList := make(map[string]SerDes)
+	if s.VIP != "" {
+		//this is not FW Mark based service
+		af, addr, err := toAFUnion(s.VIP)
+		if err != nil {
+			return nil, err
+		}
+		//1<<32-1
+		netmask := uint32(4294967295)
+		if af == syscall.AF_INET6 {
+			netmask = 128
+		}
+		AF := U16Type(af)
+		Port := Net16Type(s.Port)
+		Netmask := U32Type(netmask)
+		Addr := BinaryType(addr)
+		Proto := U16Type(s.Proto)
+		Flags := BinaryType([]byte{0, 0, 0, 0, 0, 0, 0, 0})
+		attrList["AF"] = &AF
+		attrList["PORT"] = &Port
+		attrList["PROTOCOL"] = &Proto
+		attrList["ADDR"] = &Addr
+		attrList["NETMASK"] = &Netmask
+		attrList["FLAGS"] = &Flags
+	} else {
+		//FW Mark
+		FWMark := U32Type(s.FWMark)
+		AF := U16Type(s.AF)
+		attrList["FWMARK"] = &FWMark
+		attrList["AF"] = &AF
+	}
+	Sched := NulStringType(s.Sched)
+	attrList["SCHED_NAME"] = &Sched
+	return attrList, nil
 }
 
 func (s *Service) ToString() string {
@@ -518,6 +555,43 @@ func (ipvs *IpvsClient) Flush() error {
 	return nil
 }
 
+func (ipvs *IpvsClient) GetPoolForService(svc Service) (Pool, error) {
+	attrList, err := svc.CreateAttrList()
+	if err != nil {
+		return Pool{}, err
+	}
+	pool, err := ipvs.getPoolForAttrList(attrList)
+	return pool, err
+}
+
+func (ipvs *IpvsClient) getPoolForAttrList(
+	list map[string]SerDes) (Pool, error) {
+	var pool Pool
+	pool.Service.InitFromAttrList(list)
+	destReq, err := ipvs.mt.InitGNLMessageStr("GET_DEST", MATCH_ROOT_REQUEST)
+	if err != nil {
+		return pool, err
+	}
+	svcAttrListDef, _ := ATLName2ATL["IpvsServiceAttrList"]
+	svcAttrListType := CreateAttrListType(svcAttrListDef)
+	svcAttrListType.Set(list)
+	destReq.AttrMap["SERVICE"] = &svcAttrListType
+	destResps, err := ipvs.Sock.Query(destReq)
+	if err != nil {
+		return pool, err
+	}
+	for _, destResp := range destResps {
+		var d Dest
+		dstAttrList := destResp.GetAttrList("DEST")
+		d.AF = pool.Service.AF
+		if dstAttrList != nil {
+			d.InitFromAttrList(dstAttrList.(*AttrListType).Amap)
+			pool.Dests = append(pool.Dests, d)
+		}
+	}
+	return pool, nil
+}
+
 func (ipvs *IpvsClient) GetPools() ([]Pool, error) {
 	var pools []Pool
 	msg, err := ipvs.mt.InitGNLMessageStr("GET_SERVICE", MATCH_ROOT_REQUEST)
@@ -529,26 +603,10 @@ func (ipvs *IpvsClient) GetPools() ([]Pool, error) {
 		return nil, err
 	}
 	for _, resp := range resps {
-		var pool Pool
 		svcAttrList := resp.GetAttrList("SERVICE")
-		pool.Service.InitFromAttrList(svcAttrList.(*AttrListType).Amap)
-		destReq, err := ipvs.mt.InitGNLMessageStr("GET_DEST", MATCH_ROOT_REQUEST)
+		pool, err := ipvs.getPoolForAttrList(svcAttrList.(*AttrListType).Amap)
 		if err != nil {
 			return nil, err
-		}
-		destReq.AttrMap["SERVICE"] = svcAttrList.(*AttrListType)
-		destResps, err := ipvs.Sock.Query(destReq)
-		if err != nil {
-			return nil, err
-		}
-		for _, destResp := range destResps {
-			var d Dest
-			dstAttrList := destResp.GetAttrList("DEST")
-			d.AF = pool.Service.AF
-			if dstAttrList != nil {
-				d.InitFromAttrList(dstAttrList.(*AttrListType).Amap)
-				pool.Dests = append(pool.Dests, d)
-			}
 		}
 		pools = append(pools, pool)
 	}
