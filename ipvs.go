@@ -338,7 +338,8 @@ func (s *Service) InitFromAttrList(list map[string]SerDes) error {
 	} else {
 		fw := list["FWMARK"].(*U32Type)
 		s.FWMark = uint32(*fw)
-
+		af := list["AF"].(*U16Type)
+		s.AF = uint16(*af)
 	}
 	sched := list["SCHED_NAME"].(*NulStringType)
 	s.Sched = string(*sched)
@@ -396,7 +397,7 @@ func (s *Service) ToString() string {
 		}
 		return strings.Join([]string{s.VIP, proto, port}, ":")
 	} else {
-		//fwmark bassed service
+		//fwmark based service
 		fwmark := strconv.FormatUint(uint64(s.FWMark), 10)
 		proto := ""
 		switch s.AF {
@@ -639,8 +640,8 @@ func (ipvs *IpvsClient) GetAllStatsBrief() (map[string]StatsIntf, error) {
 	if err != nil {
 		return nil, err
 	}
-	var svc Service
 	for _, resp := range resps {
+		var svc Service
 		svcAttrList := resp.GetAttrList("SERVICE").(*AttrListType)
 		svc.InitFromAttrList(svcAttrList.Amap)
 		sstat := GetStatsFromAttrList(svcAttrList)
