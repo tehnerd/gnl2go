@@ -71,13 +71,13 @@ const (
 )
 
 var (
-	NO_FLAGS                      = []byte{0, 0, 0, 0, 0, 0, 0, 0} /* no flags */
-	IP_VS_SVC_F_PERSISTENT        = []byte{0, 0, 0, 0, 0, 0, 0, 1} /* persistent port */
-	IP_VS_SVC_F_HASHED            = []byte{0, 0, 0, 0, 0, 0, 0, 2} /* hashed entry */
-	IP_VS_SVC_F_ONEPACKET         = []byte{0, 0, 0, 0, 0, 0, 0, 4} /* one-packet scheduling */
-	IP_VS_SVC_F_SCHED1            = []byte{0, 0, 0, 0, 0, 0, 0, 8} /* scheduler flag 1 */
-	IP_VS_SVC_F_SCHED2            = []byte{0, 0, 0, 0, 0, 0, 1, 0} /* scheduler flag 2 */
-	IP_VS_SVC_F_SCHED3            = []byte{0, 0, 0, 0, 0, 0, 2, 0} /* scheduler flag 3 */
+	NO_FLAGS uint32                     = 0x0 /* no flags */
+	IP_VS_SVC_F_PERSISTENT uint32       = 0x1 /* persistent port */
+	IP_VS_SVC_F_HASHED uint32           = 0x2 /* hashed entry */
+	IP_VS_SVC_F_ONEPACKET uint32        = 0x4 /* one-packet scheduling */
+	IP_VS_SVC_F_SCHED1 uint32           = 0x8 /* scheduler flag 1 */
+	IP_VS_SVC_F_SCHED2 uint32           = 0x10 /* scheduler flag 2 */
+	IP_VS_SVC_F_SCHED3 uint32           = 0x20 /* scheduler flag 3 */
 	IP_VS_SVC_F_SCHED_SH_FALLBACK = IP_VS_SVC_F_SCHED1
 	IP_VS_SVC_F_SCHED_SH_PORT     = IP_VS_SVC_F_SCHED2
 )
@@ -119,7 +119,7 @@ var (
 			AttrTuple{Name: "PORT", Type: "Net16Type"},
 			AttrTuple{Name: "FWMARK", Type: "U32Type"},
 			AttrTuple{Name: "SCHED_NAME", Type: "NulStringType"},
-			AttrTuple{Name: "FLAGS", Type: "BinaryType"},
+			AttrTuple{Name: "FLAGS", Type: "U32Type"},
 			AttrTuple{Name: "TIMEOUT", Type: "U32Type"},
 			AttrTuple{Name: "NETMASK", Type: "U32Type"},
 			AttrTuple{Name: "STATS", Type: "IpvsStatsAttrList"},
@@ -682,7 +682,7 @@ func (ipvs *IpvsClient) modifyService(method string, vip string,
 	Netmask := U32Type(netmask)
 	Addr := BinaryType(addr)
 	Proto := U16Type(protocol)
-	Flags := BinaryType([]byte{0, 0, 0, 0, 0, 0, 0, 0})
+	Flags := U32Type(0)
 	atl, _ := ATLName2ATL["IpvsServiceAttrList"]
 	sattr := CreateAttrListType(atl)
 	sattr.Amap["AF"] = &AF
@@ -709,11 +709,11 @@ func (ipvs *IpvsClient) AddService(vip string,
 }
 
 func (ipvs *IpvsClient) AddServiceWithFlags(vip string,
-	port uint16, protocol uint16, sched string, flags []byte) error {
+	port uint16, protocol uint16, sched string, flags uint32) error {
 	paramsMap := make(map[string]SerDes)
 	Sched := NulStringType(sched)
 	Timeout := U32Type(0)
-	Flags := BinaryType(flags)
+	Flags := U32Type(flags)
 	paramsMap["FLAGS"] = &Flags
 	paramsMap["SCHED_NAME"] = &Sched
 	paramsMap["TIMEOUT"] = &Timeout
