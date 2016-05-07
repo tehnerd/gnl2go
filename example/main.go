@@ -35,9 +35,11 @@ func main() {
 	//Testing IPv6 AddService
 	err = ipvs.AddService("2a02::33", 80, uint16(gnl2go.ToProtoNum("tcp")), "wlc")
 	if err != nil {
-		fmt.Printf("Error while adding IPv6 Service w/ AddService: %#v\n",
-			" could be because of lack ipv6 support in compiled ipvs (default in",
-			" rasberian)\n")
+		fmt.Printf(`
+			Error while adding IPv6 Service w/ AddService: %#v
+			could be because of lack ipv6 support in compiled ipvs
+			(default in rasberian)
+			`, err)
 		noIPv6 = true
 	}
 
