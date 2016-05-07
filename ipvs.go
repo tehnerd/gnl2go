@@ -376,13 +376,11 @@ func (s *Service) CreateAttrList() (map[string]SerDes, error) {
 		Netmask := U32Type(netmask)
 		Addr := BinaryType(addr)
 		Proto := U16Type(s.Proto)
-		Flags := BinaryType([]byte{0, 0, 0, 0, 0, 0, 0, 0})
 		attrList["AF"] = &AF
 		attrList["PORT"] = &Port
 		attrList["PROTOCOL"] = &Proto
 		attrList["ADDR"] = &Addr
 		attrList["NETMASK"] = &Netmask
-		attrList["FLAGS"] = &Flags
 	} else {
 		//FW Mark
 		FWMark := U32Type(s.FWMark)
@@ -682,7 +680,6 @@ func (ipvs *IpvsClient) modifyService(method string, vip string,
 	Netmask := U32Type(netmask)
 	Addr := BinaryType(addr)
 	Proto := U16Type(protocol)
-	Flags := BinaryType([]byte{0, 0, 0, 0, 0, 0, 0, 0})
 	atl, _ := ATLName2ATL["IpvsServiceAttrList"]
 	sattr := CreateAttrListType(atl)
 	sattr.Amap["AF"] = &AF
@@ -690,7 +687,6 @@ func (ipvs *IpvsClient) modifyService(method string, vip string,
 	sattr.Amap["PROTOCOL"] = &Proto
 	sattr.Amap["ADDR"] = &Addr
 	sattr.Amap["NETMASK"] = &Netmask
-	sattr.Amap["FLAGS"] = &Flags
 	for k, v := range amap {
 		sattr.Amap[k] = v
 	}
@@ -748,11 +744,9 @@ func (ipvs *IpvsClient) modifyFWMService(method string, fwmark uint32,
 		return err
 	}
 	Netmask := U32Type(netmask)
-	Flags := BinaryType([]byte{0, 0, 0, 0, 0, 0, 0, 0})
 	atl, _ := ATLName2ATL["IpvsServiceAttrList"]
 	sattr := CreateAttrListType(atl)
 	sattr.Amap["FWMARK"] = &FWMark
-	sattr.Amap["FLAGS"] = &Flags
 	sattr.Amap["AF"] = &AF
 	sattr.Amap["NETMASK"] = &Netmask
 	for k, v := range amap {
@@ -768,9 +762,16 @@ func (ipvs *IpvsClient) modifyFWMService(method string, fwmark uint32,
 
 func (ipvs *IpvsClient) AddFWMService(fwmark uint32,
 	sched string, af uint16) error {
+	return ipvs.AddFWMServiceWithFlags(fwmark, sched, af, NO_FLAGS)
+}
+
+func (ipvs *IpvsClient) AddFWMServiceWithFlags(fwmark uint32,
+	sched string, af uint16, flags []byte) error {
 	paramsMap := make(map[string]SerDes)
 	Sched := NulStringType(sched)
 	Timeout := U32Type(0)
+	Flags := BinaryType(flags)
+	paramsMap["FLAGS"] = &Flags
 	paramsMap["SCHED_NAME"] = &Sched
 	paramsMap["TIMEOUT"] = &Timeout
 	err := ipvs.modifyFWMService("NEW_SERVICE", fwmark,
