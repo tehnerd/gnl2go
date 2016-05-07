@@ -71,13 +71,13 @@ const (
 )
 
 var (
-	NO_FLAGS                      = []byte{0, 0, 0, 0, 0, 0, 0, 0} /* no flags */
-	IP_VS_SVC_F_PERSISTENT        = []byte{0, 0, 0, 0, 0, 0, 0, 1} /* persistent port */
-	IP_VS_SVC_F_HASHED            = []byte{0, 0, 0, 0, 0, 0, 0, 2} /* hashed entry */
-	IP_VS_SVC_F_ONEPACKET         = []byte{0, 0, 0, 0, 0, 0, 0, 4} /* one-packet scheduling */
-	IP_VS_SVC_F_SCHED1            = []byte{0, 0, 0, 0, 0, 0, 0, 8} /* scheduler flag 1 */
-	IP_VS_SVC_F_SCHED2            = []byte{0, 0, 0, 0, 0, 0, 1, 0} /* scheduler flag 2 */
-	IP_VS_SVC_F_SCHED3            = []byte{0, 0, 0, 0, 0, 0, 2, 0} /* scheduler flag 3 */
+	NO_FLAGS                      = []byte{0, 0, 0, 0, 0, 0, 0, 0}  /* no flags */
+	IP_VS_SVC_F_PERSISTENT        = []byte{0, 0, 0, 1, 0, 0, 0, 0}  /* persistent port */
+	IP_VS_SVC_F_HASHED            = []byte{0, 0, 0, 2, 0, 0, 0, 0}  /* hashed entry */
+	IP_VS_SVC_F_ONEPACKET         = []byte{0, 0, 0, 4, 0, 0, 0, 0}  /* one-packet scheduling */
+	IP_VS_SVC_F_SCHED1            = []byte{0, 0, 0, 8, 0, 0, 0, 0}  /* scheduler flag 1 */
+	IP_VS_SVC_F_SCHED2            = []byte{0, 0, 0, 16, 0, 0, 0, 0} /* scheduler flag 2 */
+	IP_VS_SVC_F_SCHED3            = []byte{0, 0, 0, 32, 0, 0, 0, 0} /* scheduler flag 3 */
 	IP_VS_SVC_F_SCHED_SH_FALLBACK = IP_VS_SVC_F_SCHED1
 	IP_VS_SVC_F_SCHED_SH_PORT     = IP_VS_SVC_F_SCHED2
 )

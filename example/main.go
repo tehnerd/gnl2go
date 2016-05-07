@@ -68,7 +68,7 @@ func main() {
 		err = ipvs.AddFWMService(1, "wrr", 10)
 		//This is expected error because we already have this service
 		if err != nil {
-			fmt.Println(err)
+			fmt.Printf("Expected error because we adding existing service : %#v\n", err)
 		}
 	}
 
@@ -149,7 +149,7 @@ func main() {
 		err = ipvs.AddFWMDest(10, "fc00:1::12", 10, 0, 10)
 		//Expected: there is no service with fwmark 10
 		if err != nil {
-			fmt.Printf("expected error coz of lack fwmark 10: %#v\n", err)
+			fmt.Printf("expected error because of lack fwmark 10: %#v\n", err)
 		}
 
 		ipvs.AddFWMDest(1, "fc00:2::12", 10, 0, 20)
@@ -166,6 +166,27 @@ func main() {
 			fmt.Printf("error while running UpdateFWMDest: %#v\n", err)
 			return
 		}
+	}
+	/* Testing IPv4 Service w/ Flags */
+	err = ipvs.AddServiceWithFlags("192.168.1.22", 50100,
+		uint16(gnl2go.ToProtoNum("udp")), "sh",
+		gnl2go.IP_VS_SVC_F_SCHED_SH_FALLBACK)
+	if err != nil {
+		fmt.Printf(`
+		cant add ipv4 service w/ AddServiceWithFlags; err is : %#v\n`, err)
+		return
+	}
+	err = ipvs.AddDestPort("192.168.1.22", 50100, "192.168.1.2",
+		8080, uint16(gnl2go.ToProtoNum("udp")), 10, gnl2go.IPVS_MASQUERADING)
+	if err != nil {
+		fmt.Printf("cant add 1st dest to service w/  sched flags: %#v\n", err)
+		return
+	}
+	ipvs.AddDestPort("192.168.1.22", 50100, "192.168.1.2",
+		8081, uint16(gnl2go.ToProtoNum("udp")), 10, gnl2go.IPVS_MASQUERADING)
+	if err != nil {
+		fmt.Printf("cant add 2nd dest to service w/  sched flags: %#v\n", err)
+		return
 	}
 	fmt.Println("done")
 }
