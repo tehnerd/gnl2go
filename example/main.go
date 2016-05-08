@@ -170,7 +170,7 @@ func main() {
 	/* Testing IPv4 Service w/ Flags */
 	err = ipvs.AddServiceWithFlags("192.168.1.22", 50100,
 		uint16(gnl2go.ToProtoNum("udp")), "sh",
-		gnl2go.IP_VS_SVC_F_SCHED_SH_FALLBACK)
+		gnl2go.BIN_IP_VS_SVC_F_SCHED_SH_FALLBACK)
 	if err != nil {
 		fmt.Printf(`
 		cant add ipv4 service w/ AddServiceWithFlags; err is : %#v\n`, err)
@@ -186,6 +186,15 @@ func main() {
 		8081, uint16(gnl2go.ToProtoNum("udp")), 10, gnl2go.IPVS_MASQUERADING)
 	if err != nil {
 		fmt.Printf("cant add 2nd dest to service w/  sched flags: %#v\n", err)
+		return
+	}
+	/* Testing IPv4 Service w/ Flags (thru helper routine) */
+	err = ipvs.AddServiceWithFlags("192.168.1.22", 50101,
+		uint16(gnl2go.ToProtoNum("udp")), "sh",
+		gnl2go.U32ToBinFlags(
+			gnl2go.IP_VS_SVC_F_SCHED_SH_FALLBACK|gnl2go.IP_VS_SVC_F_SCHED_SH_PORT))
+	if err != nil {
+		fmt.Printf("error while adding service w/ flags and helper: %#v\n", err)
 		return
 	}
 	fmt.Println("done")

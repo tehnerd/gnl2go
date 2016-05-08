@@ -70,16 +70,29 @@ const (
 	IPVS_TUNNELING    = 2
 )
 
-var (
-	NO_FLAGS                      = []byte{0, 0, 0, 0, 0, 0, 0, 0}  /* no flags */
-	IP_VS_SVC_F_PERSISTENT        = []byte{0, 0, 0, 1, 0, 0, 0, 0}  /* persistent port */
-	IP_VS_SVC_F_HASHED            = []byte{0, 0, 0, 2, 0, 0, 0, 0}  /* hashed entry */
-	IP_VS_SVC_F_ONEPACKET         = []byte{0, 0, 0, 4, 0, 0, 0, 0}  /* one-packet scheduling */
-	IP_VS_SVC_F_SCHED1            = []byte{0, 0, 0, 8, 0, 0, 0, 0}  /* scheduler flag 1 */
-	IP_VS_SVC_F_SCHED2            = []byte{0, 0, 0, 16, 0, 0, 0, 0} /* scheduler flag 2 */
-	IP_VS_SVC_F_SCHED3            = []byte{0, 0, 0, 32, 0, 0, 0, 0} /* scheduler flag 3 */
+const (
+	NO_FLAGS               = 0x0    /* no flags */
+	IP_VS_SVC_F_PERSISTENT = 0x0001 /* persistent port */
+	IP_VS_SVC_F_HASHED     = 0x0002 /* hashed entry */
+	IP_VS_SVC_F_ONEPACKET  = 0x0004 /* one-packet scheduling */
+	IP_VS_SVC_F_SCHED1     = 0x0008 /* scheduler flag 1 */
+	IP_VS_SVC_F_SCHED2     = 0x0010 /* scheduler flag 2 */
+	IP_VS_SVC_F_SCHED3     = 0x0020 /* scheduler flag 3 */
+
 	IP_VS_SVC_F_SCHED_SH_FALLBACK = IP_VS_SVC_F_SCHED1
 	IP_VS_SVC_F_SCHED_SH_PORT     = IP_VS_SVC_F_SCHED2
+)
+
+var (
+	BIN_NO_FLAGS                      = []byte{0, 0, 0, 0, 0, 0, 0, 0}        /* no flags */
+	BIN_IP_VS_SVC_F_PERSISTENT        = U32ToBinFlags(IP_VS_SVC_F_PERSISTENT) /* persistent port */
+	BIN_IP_VS_SVC_F_HASHED            = U32ToBinFlags(IP_VS_SVC_F_HASHED)     /* hashed entry */
+	BIN_IP_VS_SVC_F_ONEPACKET         = U32ToBinFlags(IP_VS_SVC_F_ONEPACKET)  /* one-packet scheduling */
+	BIN_IP_VS_SVC_F_SCHED1            = U32ToBinFlags(IP_VS_SVC_F_SCHED1)     /* scheduler flag 1 */
+	BIN_IP_VS_SVC_F_SCHED2            = U32ToBinFlags(IP_VS_SVC_F_SCHED2)     /* scheduler flag 2 */
+	BIN_IP_VS_SVC_F_SCHED3            = U32ToBinFlags(IP_VS_SVC_F_SCHED3)     /* scheduler flag 3 */
+	BIN_IP_VS_SVC_F_SCHED_SH_FALLBACK = BIN_IP_VS_SVC_F_SCHED1
+	BIN_IP_VS_SVC_F_SCHED_SH_PORT     = BIN_IP_VS_SVC_F_SCHED2
 )
 
 var (
@@ -186,6 +199,21 @@ var (
 		AttrListTuple{Name: "FLUSH", AttrList: CreateAttrListType(IpvsCmdAttrList)},
 	}
 )
+
+func U32ToBinFlags(flags uint32) []byte {
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.LittleEndian, flags)
+	if err != nil {
+		/* we dont wanna trow so will return all nulls */
+		return []byte{0, 0, 0, 0, 0, 0, 0, 0}
+	}
+	encFlags := buf.Bytes()
+	/* this is helper function and was tested w/ current flags (as for 4.5)
+	   so mask will cover only first byte; as for now, there is no flags
+	   in subsequent */
+	encFlags = append(encFlags, []byte{255, 0, 0, 0}...)
+	return encFlags
+}
 
 func validateIp(ip string) bool {
 	for _, c := range ip {
@@ -701,7 +729,7 @@ func (ipvs *IpvsClient) modifyService(method string, vip string,
 func (ipvs *IpvsClient) AddService(vip string,
 	port uint16, protocol uint16, sched string) error {
 	return ipvs.AddServiceWithFlags(vip, port, protocol,
-		sched, NO_FLAGS)
+		sched, BIN_NO_FLAGS)
 }
 
 func (ipvs *IpvsClient) AddServiceWithFlags(vip string,
@@ -762,7 +790,7 @@ func (ipvs *IpvsClient) modifyFWMService(method string, fwmark uint32,
 
 func (ipvs *IpvsClient) AddFWMService(fwmark uint32,
 	sched string, af uint16) error {
-	return ipvs.AddFWMServiceWithFlags(fwmark, sched, af, NO_FLAGS)
+	return ipvs.AddFWMServiceWithFlags(fwmark, sched, af, BIN_NO_FLAGS)
 }
 
 func (ipvs *IpvsClient) AddFWMServiceWithFlags(fwmark uint32,
