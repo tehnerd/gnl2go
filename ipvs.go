@@ -68,6 +68,7 @@ import (
 const (
 	IPVS_MASQUERADING = 0
 	IPVS_TUNNELING    = 2
+	IPVS_DIRECTROUTE  = 3
 )
 
 const (
